@@ -378,6 +378,8 @@ pattern_match() {
     "version"|"omarchy version") echo "omarchy-version" ;;
     "about")                echo "omarchy-launch-about" ;;
     "system info"|"sysinfo"|"specs") echo "fastfetch" ;;
+    "storage"|"disk"|"disk usage"|"disk space"|"free space"|"how much space"*)
+      echo "df -h --output=source,size,used,avail,pcent -x tmpfs -x devtmpfs -x efivarfs | head -20" ;;
 
     # Power
     "reboot"|"restart computer"|"restart system") echo "omarchy-cmd-reboot" ;;
@@ -597,6 +599,11 @@ keyword_match() {
   fi
   if has "date" && (has "what" || has "show" || has "tell" || has "display"); then
     echo "date '+%A, %B %d %Y'"; return 0
+  fi
+
+  # ── Storage/Disk ──
+  if has "storage" || has "disk" || has "space" && (has "free" || has "left" || has "available" || has "how" || has "much"); then
+    echo "df -h --output=source,size,used,avail,pcent -x tmpfs -x devtmpfs -x efivarfs | head -20"; return 0
   fi
 
   # ── System info ──
