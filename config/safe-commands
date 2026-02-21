@@ -88,6 +88,7 @@ omarchy-cmd-share
 
 # Command Center tools
 omarchy-cc-tmux
+omarchy-cc-tmux-monitor
 
 # Notification
 omarchy-notification-dismiss

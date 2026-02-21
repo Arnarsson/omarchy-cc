@@ -2,9 +2,10 @@
 
 # Tmux session manager for Command Center.
 # Usage:
-#   omarchy-cc-tmux           — list sessions
+#   omarchy-cc-tmux           — list sessions with CPU/MEM
 #   omarchy-cc-tmux kill <N>  — kill session N
 #   omarchy-cc-tmux kill-detached — kill all detached sessions
+#   omarchy-cc-tmux monitor   — launch live curses monitor
 
 set -uo pipefail
 
@@ -12,6 +13,44 @@ if ! command -v tmux &>/dev/null; then
   echo "tmux is not installed."
   exit 1
 fi
+
+# Get CPU% and MEM% for all processes in a tmux session
+session_resources() {
+  local session="$1"
+  local pids
+  pids=$(tmux list-panes -t "$session" -F '#{pane_pid}' 2>/dev/null) || { echo "0.0 0.0"; return; }
+
+  local total_cpu=0 total_mem=0
+  for pid in $pids; do
+    [[ -z "$pid" ]] && continue
+    local stats
+    stats=$(ps -p "$pid" --ppid "$pid" -o %cpu=,%mem= --no-headers 2>/dev/null) || continue
+    while read -r cpu mem; do
+      [[ -z "$cpu" ]] && continue
+      total_cpu=$(awk "BEGIN{print $total_cpu + $cpu}")
+      total_mem=$(awk "BEGIN{print $total_mem + $mem}")
+    done <<< "$stats"
+  done
+
+  printf "%.1f %.1f" "$total_cpu" "$total_mem"
+}
+
+format_duration() {
+  local elapsed="$1"
+  if [[ $elapsed -lt 60 ]]; then
+    echo "${elapsed}s"
+  elif [[ $elapsed -lt 3600 ]]; then
+    echo "$((elapsed / 60))m"
+  elif [[ $elapsed -lt 86400 ]]; then
+    local hours=$((elapsed / 3600))
+    local mins=$(( (elapsed % 3600) / 60 ))
+    echo "${hours}h ${mins}m"
+  else
+    local days=$((elapsed / 86400))
+    local hours=$(( (elapsed % 86400) / 3600 ))
+    echo "${days}d ${hours}h"
+  fi
+}
 
 action="${1:-list}"
 target="${2:-}"
@@ -27,30 +66,19 @@ case "$action" in
 
     now=$(date +%s)
 
-    printf "  %-10s %-10s %-12s %s\n" "SESSION" "WINDOWS" "UPTIME" "STATUS"
-    printf "  %-10s %-10s %-12s %s\n" "-------" "-------" "------" "------"
+    printf "  %-12s %4s %6s %6s  %-10s  %s\n" "SESSION" "WIN" "CPU%" "MEM%" "UPTIME" "STATUS"
+    printf "  %-12s %4s %6s %6s  %-10s  %s\n" "────────────" "───" "─────" "─────" "──────────" "────────"
 
     while IFS='|' read -r name created windows attached; do
       elapsed=$((now - created))
+      age=$(format_duration "$elapsed")
 
-      if [[ $elapsed -lt 60 ]]; then
-        age="${elapsed}s"
-      elif [[ $elapsed -lt 3600 ]]; then
-        age="$((elapsed / 60))m"
-      elif [[ $elapsed -lt 86400 ]]; then
-        hours=$((elapsed / 3600))
-        mins=$(( (elapsed % 3600) / 60 ))
-        age="${hours}h ${mins}m"
-      else
-        days=$((elapsed / 86400))
-        hours=$(( (elapsed % 86400) / 3600 ))
-        age="${days}d ${hours}h"
-      fi
+      read -r cpu mem <<< "$(session_resources "$name")"
 
       status="detached"
       [[ "$attached" == "1" ]] && status="attached"
 
-      printf "  %-10s %-10s %-12s %s\n" "$name" "$windows" "$age" "$status"
+      printf "  %-12s %4s %5s%% %5s%%  %-10s  %s\n" "$name" "$windows" "$cpu" "$mem" "$age" "$status"
     done <<< "$sessions"
 
     echo ""
@@ -80,6 +108,17 @@ case "$action" in
       fi
     else
       echo "Usage: kill <session-name> or kill detached"
+    fi
+    ;;
+
+  monitor)
+    # Launch the live curses monitor
+    monitor_script="$(dirname "$0")/omarchy-cc-tmux-monitor"
+    if [[ -x "$monitor_script" ]]; then
+      exec "$monitor_script"
+    else
+      echo "Live monitor not available. Showing list instead."
+      exec "$0" list
     fi
     ;;
 

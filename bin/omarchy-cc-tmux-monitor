@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Live tmux session resource monitor (inspired by tmux-task-monitor).
+Displays CPU/memory usage per session with auto-refresh.
+Press q to quit, k to kill selected session, r to refresh."""
+
+import curses
+import subprocess
+import time
+import sys
+
+
+def get_sessions():
+    """Get tmux sessions with resource info."""
+    try:
+        raw = subprocess.check_output(
+            ['tmux', 'list-sessions', '-F',
+             '#{session_name}|#{session_created}|#{session_windows}|#{session_attached}'],
+            text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
+    sessions = []
+    now = time.time()
+    for line in raw.split('\n'):
+        if not line:
+            continue
+        parts = line.split('|')
+        if len(parts) != 4:
+            continue
+        name, created, windows, attached = parts
+        try:
+            elapsed = int(now - int(created))
+        except ValueError:
+            elapsed = 0
+
+        cpu, mem = get_session_resources(name)
+
+        sessions.append({
+            'name': name,
+            'windows': int(windows),
+            'attached': attached == '1',
+            'elapsed': elapsed,
+            'cpu': cpu,
+            'mem': mem,
+        })
+    return sessions
+
+
+def get_session_resources(session):
+    """Sum CPU% and MEM% for all processes in a tmux session."""
+    try:
+        panes = subprocess.check_output(
+            ['tmux', 'list-panes', '-t', session, '-F', '#{pane_pid}'],
+            text=True, stderr=subprocess.DEVNULL
+        ).strip().split('\n')
+    except subprocess.CalledProcessError:
+        return 0.0, 0.0
+
+    total_cpu = 0.0
+    total_mem = 0.0
+    for pid in panes:
+        pid = pid.strip()
+        if not pid:
+            continue
+        try:
+            ps_out = subprocess.check_output(
+                ['ps', '-p', pid, '--ppid', pid, '-o', '%cpu=,%mem=', '--no-headers'],
+                text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            for line in ps_out.split('\n'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        total_cpu += float(parts[0])
+                        total_mem += float(parts[1])
+                    except ValueError:
+                        pass
+        except subprocess.CalledProcessError:
+            pass
+    return round(total_cpu, 1), round(total_mem, 1)
+
+
+def format_duration(seconds):
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m"
+    elif seconds < 86400:
+        h, m = divmod(seconds, 3600)
+        return f"{h}h {m // 60}m"
+    else:
+        d, rem = divmod(seconds, 86400)
+        return f"{d}d {rem // 3600}h"
+
+
+def main(stdscr):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_GREEN, -1)
+    curses.init_pair(2, curses.COLOR_YELLOW, -1)
+    curses.init_pair(3, curses.COLOR_RED, -1)
+    curses.init_pair(4, curses.COLOR_CYAN, -1)
+    stdscr.timeout(2000)  # refresh every 2s
+
+    selected = 0
+
+    while True:
+        stdscr.clear()
+        sessions = get_sessions()
+        h, w = stdscr.getmaxyx()
+
+        # Header
+        title = " tmux session monitor "
+        stdscr.addstr(0, 0, title, curses.A_BOLD | curses.color_pair(4))
+        help_text = "q:quit  k:kill  r:refresh"
+        if len(title) + 2 + len(help_text) < w:
+            stdscr.addstr(0, len(title) + 2, help_text, curses.A_DIM)
+
+        # Column headers
+        header = f"  {'SESSION':<15} {'WIN':>4} {'CPU%':>6} {'MEM%':>6} {'UPTIME':>10} {'STATUS':>10}"
+        if len(header) < w:
+            stdscr.addstr(2, 0, header[:w-1], curses.A_BOLD)
+            stdscr.addstr(3, 0, ("─" * min(w - 1, 65)))
+
+        if not sessions:
+            stdscr.addstr(5, 2, "No active tmux sessions.", curses.A_DIM)
+        else:
+            for i, s in enumerate(sessions):
+                if i + 4 >= h - 2:
+                    break
+
+                status = "attached" if s['attached'] else "detached"
+                uptime = format_duration(s['elapsed'])
+
+                # Color based on CPU usage
+                if s['cpu'] > 50:
+                    color = curses.color_pair(3)  # red
+                elif s['cpu'] > 10:
+                    color = curses.color_pair(2)  # yellow
+                else:
+                    color = curses.color_pair(1)  # green
+
+                line = f"  {s['name']:<15} {s['windows']:>4} {s['cpu']:>5.1f}% {s['mem']:>5.1f}% {uptime:>10} {status:>10}"
+
+                attr = curses.A_REVERSE if i == selected else 0
+                try:
+                    stdscr.addstr(i + 4, 0, line[:w-1], attr | color)
+                except curses.error:
+                    pass
+
+        # Footer
+        try:
+            stdscr.addstr(h - 1, 0, f" {len(sessions)} session(s) ", curses.A_DIM)
+        except curses.error:
+            pass
+
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key == ord('q') or key == 27:  # q or Escape
+            break
+        elif key == curses.KEY_UP and selected > 0:
+            selected -= 1
+        elif key == curses.KEY_DOWN and sessions and selected < len(sessions) - 1:
+            selected += 1
+        elif key == ord('k') and sessions and 0 <= selected < len(sessions):
+            name = sessions[selected]['name']
+            subprocess.run(['tmux', 'kill-session', '-t', name],
+                           stderr=subprocess.DEVNULL)
+            if selected >= len(sessions) - 1:
+                selected = max(0, selected - 1)
+        elif key == ord('r'):
+            pass  # just refresh
+
+
+if __name__ == '__main__':
+    curses.wrapper(main)

@@ -407,6 +407,8 @@ pattern_match() {
     # Tmux sessions
     "tmux"|"tmux session"*|"session"*|"active tmux"*|"active session"*|"list session"*)
       echo "omarchy-cc-tmux" ;;
+    "tmux monitor"|"monitor tmux"|"monitor session"*|"session monitor"*|"tmux resources"*|"tmux usage"*)
+      echo "omarchy-cc-tmux monitor" ;;
     "kill session "*)
       echo "omarchy-cc-tmux kill ${input#kill session }" ;;
     "kill tmux "*)
