@@ -208,6 +208,22 @@ audio_set_sink() {
     fi
   fi
 
+  # Last resort: try matching each word individually
+  if [[ -z "$sink_name" ]]; then
+    for word in $keyword; do
+      [[ ${#word} -lt 3 ]] && continue
+      sink_name=$(echo "$sinks_json" \
+        | jq -r --arg kw "$word" '
+          .[] | select(
+            (.description | test($kw; "i")) or
+            (.name | test($kw; "i")) or
+            (.properties["device.alias"] // "" | test($kw; "i"))
+          ) | .name' \
+        | head -1)
+      [[ -n "$sink_name" ]] && break
+    done
+  fi
+
   if [[ -n "$sink_name" ]]; then
     echo "pactl set-default-sink '$sink_name'"
     return 0
@@ -754,13 +770,10 @@ gather_context() {
 # ── Ollama system prompt ─────────────────────────────────────────────────────
 
 build_ollama_prompt() {
-  local context="$1"
   cat <<SYSPROMPT
 You are a command router for Omarchy, a Linux desktop environment on Arch Linux with Hyprland.
 Your job: convert natural language requests into a SINGLE shell command.
 
-CURRENT SYSTEM STATE:
-$context
 RULES:
 - Output ONLY the shell command. Nothing else. No explanation, no markdown, no backticks.
 - If you need to chain commands, use && or ;
@@ -866,8 +879,15 @@ ollama_route() {
     return 1
   fi
 
+  # Cache the static part of the prompt, only rebuild context portion
+  local prompt_cache="$CACHE_DIR/ollama-prompt-base"
+  if [[ ! -f "$prompt_cache" ]]; then
+    build_ollama_prompt "" > "$prompt_cache"
+  fi
   local system_prompt
-  system_prompt=$(build_ollama_prompt "$context")
+  system_prompt="$(cat "$prompt_cache")
+CURRENT SYSTEM STATE:
+$context"
 
   local result
   result=$(timeout 15 ollama run "$OLLAMA_MODEL" --nowordwrap "$system_prompt
@@ -939,6 +959,42 @@ main() {
   if echo "$input" | grep -qE '^(omarchy-|hyprctl |wpctl |pactl |brightnessctl |systemctl |sudo )'; then
     echo "$raw_input"
     exit 0
+  fi
+
+  # Tier 0.5: User aliases
+  local aliases_file="$CONFIG_DIR/aliases"
+  if [[ -f "$aliases_file" ]]; then
+    while IFS='=' read -r alias_name alias_cmd; do
+      [[ -z "$alias_name" || "$alias_name" == \#* ]] && continue
+      alias_name=$(echo "$alias_name" | xargs 2>/dev/null | tr '[:upper:]' '[:lower:]') || continue
+      alias_cmd=$(echo "$alias_cmd" | xargs 2>/dev/null) || continue
+      if [[ "$input" == "$alias_name" ]]; then
+        echo "TIER:alias"
+        echo "$alias_cmd"
+        exit 0
+      fi
+    done < "$aliases_file"
+  fi
+
+  # Multi-command chaining: "set theme dark and turn on nightlight"
+  if [[ "$input" == *" and "* || "$input" == *" then "* || "$input" == *" && "* ]]; then
+    local parts chained="" sep=""
+    # Split on " and ", " then ", " && "
+    parts=$(echo "$input" | sed 's/ and /\n/g; s/ then /\n/g; s/ && /\n/g')
+    while IFS= read -r part; do
+      part=$(echo "$part" | xargs 2>/dev/null)
+      [[ -z "$part" ]] && continue
+      local sub_result
+      sub_result=$("$0" "$part" 2>/dev/null | tail -1)
+      if [[ -n "$sub_result" ]]; then
+        chained+="${sep}${sub_result}"
+        sep=" && "
+      fi
+    done <<< "$parts"
+    if [[ -n "$chained" && "$chained" == *" && "* ]]; then
+      echo "$chained"
+      exit 0
+    fi
   fi
 
   # Preprocess: strip filler, normalize synonyms

@@ -1,0 +1,9 @@
+# Custom aliases for Command Center
+# Format: alias = command
+# Lines starting with # are comments
+#
+# Examples:
+# dark mode = omarchy-theme-set "Tokyo Night"
+# light mode = omarchy-theme-set "Catppuccin Latte"
+# coding = omarchy-theme-set "Gruvbox" && omarchy-font-set "JetBrains Mono"
+# gaming = omarchy-toggle-waybar && hyprctl dispatch fullscreen
