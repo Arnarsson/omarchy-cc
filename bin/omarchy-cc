@@ -199,8 +199,7 @@ process_input() {
   description=$(describe_action "$command")
 
   if [[ -n "$description" ]]; then
-    gum style --foreground 2 --bold --inline "→ $description"
-    echo ""
+    gum style --foreground 2 --bold "→ $description"
   fi
   gum style --foreground 8 --faint "  $command"
   echo ""
@@ -227,8 +226,7 @@ process_input() {
 
   # Show copy action bar
   echo ""
-  gum style --foreground 8 --faint --inline "  [c] copy all"
-  printf "\n"
+  gum style --foreground 8 --faint "  [c] copy all"
   local key
   read -rsn1 -t 5 key 2>/dev/null || key=""
   if [[ "$key" == "c" || "$key" == "C" ]]; then
@@ -331,21 +329,11 @@ show_log() {
     esac
 
     local ts_short="${ts#*T}"
-    printf "  "
-    gum style --foreground 8 --faint --inline "$ts_short"
-    printf "  "
-    gum style --foreground "$color" --inline "$status_icon"
-    printf "  "
-    gum style --foreground "$tier_color" --inline "%-7s" "$tier"
-    printf "  %s" "$input"
-
     if [[ "$input" != "$cmd" ]]; then
-      printf "\n"
-      gum style --foreground 8 --faint "                       → $cmd  (${ms}ms)"
+      printf "  %s  %s  %-7s  %s\n" "$ts_short" "$status_icon" "$tier" "$input"
+      printf "                       → %s  (%sms)\n" "$cmd" "$ms"
     else
-      printf "  "
-      gum style --foreground 8 --faint --inline "(${ms}ms)"
-      printf "\n"
+      printf "  %s  %s  %-7s  %s  (%sms)\n" "$ts_short" "$status_icon" "$tier" "$input" "$ms"
     fi
   done
 }
