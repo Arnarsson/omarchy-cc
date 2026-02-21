@@ -347,6 +347,40 @@ teardown() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Command validation
+# ══════════════════════════════════════════════════════════════════════════════
+
+@test "validate: omarchy-theme-set is valid" {
+  run validate_command "omarchy-theme-set catppuccin"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: hyprctl dispatch is valid" {
+  run validate_command "hyprctl dispatch fullscreen"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: wpctl is valid" {
+  run validate_command "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: date is valid" {
+  run validate_command "date '+%H:%M'"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: sudo pacman is valid" {
+  run validate_command "sudo pacman -Syu"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate: gibberish is invalid" {
+  run validate_command "asdfghjkl_not_a_command zxcvbnm"
+  [ "$status" -eq 1 ]
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Claude trigger detection
 # ══════════════════════════════════════════════════════════════════════════════
 

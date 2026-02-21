@@ -835,6 +835,26 @@ date, uptime -p, fastfetch
 SYSPROMPT
 }
 
+# Validate that a command looks executable
+validate_command() {
+  local cmd="$1"
+  local first_word="${cmd%% *}"
+  # Strip any leading path
+  first_word="${first_word##*/}"
+
+  case "$first_word" in
+    omarchy-*|hyprctl|wpctl|pactl|brightnessctl|systemctl) return 0 ;;
+    date|uptime|fastfetch|neofetch|df|free|uname|whoami|hostname) return 0 ;;
+    echo|cat|ls|ps|kill|pkill|top|htop|sensors) return 0 ;;
+    sudo|pacman|yay|notify-send|uwsm-app|setsid|curl|wget) return 0 ;;
+    xdg-*|walker|ip|ss|wl-copy|wl-paste) return 0 ;;
+    bash|sh|python|python3|node) return 0 ;;
+  esac
+
+  # Check if it exists in PATH
+  command -v "$first_word" &>/dev/null
+}
+
 # ── Tier 2: Ollama ───────────────────────────────────────────────────────────
 
 ollama_route() {
@@ -860,10 +880,7 @@ User request: $input" 2>/dev/null | tr -d '`' | sed '/^$/d' | head -5)
   local first_line
   first_line=$(echo "$result" | head -1)
 
-  if echo "$first_line" | grep -qE '^(omarchy-|hyprctl|wpctl|pactl|brightnessctl|systemctl|date|uptime|fastfetch|echo|cat|ls|df|free|uname|whoami|hostname|sudo|pacman|yay|notify-send|uwsm-app|setsid|kill|pkill|pidof|xdg-|walker|/|~|ps |top |htop|sensors|ip |ss |curl |wget )'; then
-    echo "$result"; return 0
-  fi
-  if echo "$first_line" | grep -qE '^[a-zA-Z0-9_/.-]+ '; then
+  if validate_command "$first_line"; then
     echo "$result"; return 0
   fi
   return 1
