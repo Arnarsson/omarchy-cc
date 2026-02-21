@@ -86,6 +86,9 @@ omarchy-hyprland-window-pop
 # Sharing
 omarchy-cmd-share
 
+# Command Center tools
+omarchy-cc-tmux
+
 # Notification
 omarchy-notification-dismiss
 

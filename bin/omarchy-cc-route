@@ -404,6 +404,10 @@ pattern_match() {
     "share"|"share clipboard") echo "omarchy-cmd-share clipboard" ;;
     "share file")           echo "omarchy-cmd-share file" ;;
 
+    # Tmux sessions
+    "tmux"|"tmux session"*|"session"*|"active tmux"*|"active session"*|"list session"*|"kill session"*)
+      echo "omarchy-cc-tmux" ;;
+
     # Dictation
     "dictation status"|"voxtype status") echo "omarchy-voxtype-status" ;;
 
@@ -682,6 +686,11 @@ keyword_match() {
       echo "omarchy-launch-or-focus \"$app\" || hyprctl dispatch exec \"$app\""
       return 0
     fi
+  fi
+
+  # ── Tmux ──
+  if has "tmux" || has "session" && (has "list" || has "kill" || has "active" || has "manage"); then
+    echo "omarchy-cc-tmux"; return 0
   fi
 
   # ── Menu ──

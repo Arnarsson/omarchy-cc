@@ -167,6 +167,7 @@ describe_action() {
     omarchy-launch-bluetooth*) echo "Opening bluetooth settings" ;;
     omarchy-launch-wifi*)    echo "Opening wifi settings" ;;
     omarchy-voxtype-status*) echo "Checking dictation status" ;;
+    omarchy-cc-tmux*)        echo "Managing tmux sessions" ;;
     *) echo "" ;;
   esac
 }
