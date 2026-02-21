@@ -12,19 +12,10 @@ set -uo pipefail
 CONFIG_DIR="$HOME/.config/omarchy-cc"
 CACHE_DIR="$HOME/.cache/omarchy-cc"
 
-read_config() {
-  local key="$1" default="$2"
-  if [[ -f "$CONFIG_DIR/config.toml" ]]; then
-    local val
-    val=$(grep "^${key}\s*=" "$CONFIG_DIR/config.toml" 2>/dev/null | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | xargs)
-    [[ -n "$val" ]] && echo "$val" || echo "$default"
-  else
-    echo "$default"
-  fi
-}
-
-OLLAMA_MODEL=$(read_config "ollama_model" "qwen2.5-coder:7b")
-CLAUDE_ENABLED=$(read_config "claude_enabled" "true")
+# Load config (single-pass parser)
+eval "$(omarchy-cc-config)"
+OLLAMA_MODEL="${CC_OLLAMA_MODEL:-qwen2.5-coder:7b}"
+CLAUDE_ENABLED="${CC_CLAUDE_ENABLED:-true}"
 
 # ── Preprocessing ─────────────────────────────────────────────────────────────
 

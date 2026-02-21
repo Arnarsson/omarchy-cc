@@ -14,21 +14,11 @@ LAST_ACTION_FILE="$CACHE_DIR/last-action"
 
 mkdir -p "$CACHE_DIR"
 
-# Read config value
-read_config() {
-  local key="$1" default="$2"
-  if [[ -f "$CONFIG_DIR/config.toml" ]]; then
-    local val
-    val=$(grep "^${key}\s*=" "$CONFIG_DIR/config.toml" 2>/dev/null | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | xargs)
-    [[ -n "$val" ]] && echo "$val" || echo "$default"
-  else
-    echo "$default"
-  fi
-}
-
-AUTO_EXECUTE=$(read_config "auto_execute_safe" "true")
-CONFIRM_RISKY=$(read_config "confirm_risky" "true")
-TTS_ENABLED=$(read_config "tts_enabled" "false")
+# Load config (single-pass parser)
+eval "$(omarchy-cc-config)"
+AUTO_EXECUTE="${CC_AUTO_EXECUTE_SAFE:-true}"
+CONFIRM_RISKY="${CC_CONFIRM_RISKY:-true}"
+TTS_ENABLED="${CC_TTS_ENABLED:-false}"
 
 # Capture state before execution for undo support
 capture_undo_state() {

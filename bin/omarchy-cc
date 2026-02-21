@@ -17,19 +17,9 @@ mkdir -p "$CACHE_DIR"
 touch "$HISTORY_FILE"
 : > "$SESSION_LOG"
 
-# Read config value
-read_config() {
-  local key="$1" default="$2"
-  if [[ -f "$CONFIG_DIR/config.toml" ]]; then
-    local val
-    val=$(grep "^${key}\s*=" "$CONFIG_DIR/config.toml" 2>/dev/null | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | xargs)
-    [[ -n "$val" ]] && echo "$val" || echo "$default"
-  else
-    echo "$default"
-  fi
-}
-
-HISTORY_SIZE=$(read_config "history_size" "100")
+# Load config (single-pass parser)
+eval "$(omarchy-cc-config)"
+HISTORY_SIZE="${CC_HISTORY_SIZE:-100}"
 
 # Add to history
 add_history() {

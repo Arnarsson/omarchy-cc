@@ -1,0 +1,38 @@
+#!/bin/bash
+# Parse omarchy-cc config and export values.
+# Usage: eval "$(omarchy-cc-config)"
+
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-cc/config.toml"
+
+# Defaults
+CC_TTS_ENABLED=false
+CC_OLLAMA_MODEL="qwen2.5-coder:7b"
+CC_CLAUDE_ENABLED=true
+CC_HISTORY_SIZE=100
+CC_AUTO_EXECUTE_SAFE=true
+CC_CONFIRM_RISKY=true
+CC_VOICE_INPUT=true
+CC_VOICE_OUTPUT=false
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  while IFS='=' read -r key value; do
+    key=$(echo "$key" | xargs 2>/dev/null) || continue
+    value=$(echo "$value" | xargs 2>/dev/null | tr -d '"') || continue
+    [[ -z "$key" || "$key" == \#* || "$key" == \[* ]] && continue
+    case "$key" in
+      tts_enabled)        CC_TTS_ENABLED="$value" ;;
+      ollama_model)       CC_OLLAMA_MODEL="$value" ;;
+      claude_enabled)     CC_CLAUDE_ENABLED="$value" ;;
+      history_size)       CC_HISTORY_SIZE="$value" ;;
+      auto_execute_safe)  CC_AUTO_EXECUTE_SAFE="$value" ;;
+      confirm_risky)      CC_CONFIRM_RISKY="$value" ;;
+      input_enabled)      CC_VOICE_INPUT="$value" ;;
+      output_enabled)     CC_VOICE_OUTPUT="$value" ;;
+    esac
+  done < "$CONFIG_FILE"
+fi
+
+for var in CC_TTS_ENABLED CC_OLLAMA_MODEL CC_CLAUDE_ENABLED CC_HISTORY_SIZE \
+           CC_AUTO_EXECUTE_SAFE CC_CONFIRM_RISKY CC_VOICE_INPUT CC_VOICE_OUTPUT; do
+  echo "export $var=\"${!var}\""
+done
