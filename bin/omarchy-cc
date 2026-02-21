@@ -21,14 +21,12 @@ touch "$HISTORY_FILE"
 eval "$(omarchy-cc-config)"
 HISTORY_SIZE="${CC_HISTORY_SIZE:-100}"
 
-# Add to history
+# Add to history (TSV format: timestamp\tcommand)
 add_history() {
   local entry="$1"
   [[ -z "$entry" ]] && return
-  local last
-  last=$(tail -1 "$HISTORY_FILE" 2>/dev/null || true)
-  [[ "$last" == "$entry" ]] && return
-  echo "$entry" >> "$HISTORY_FILE"
+  echo "$(date +%s)	$entry" >> "$HISTORY_FILE"
+  # Trim to max size
   local count
   count=$(wc -l < "$HISTORY_FILE")
   if [[ $count -gt $HISTORY_SIZE ]]; then
@@ -37,14 +35,35 @@ add_history() {
   fi
 }
 
-# Show recent history
+# Get frecency-scored suggestions (frequency × recency)
+get_suggestions() {
+  local count="${1:-5}"
+  [[ ! -s "$HISTORY_FILE" ]] && return
+  local now
+  now=$(date +%s)
+  awk -F'\t' -v now="$now" '
+    NF >= 2 {
+      cmd = $2
+      ts = $1 + 0
+      age = now - ts
+      if (age < 300) weight = 10
+      else if (age < 3600) weight = 5
+      else if (age < 86400) weight = 2
+      else weight = 1
+      score[cmd] += weight
+    }
+    END {
+      for (cmd in score) print score[cmd] "\t" cmd
+    }
+  ' "$HISTORY_FILE" | sort -rn | head -n "$count" | cut -f2-
+}
+
+# Show recent history (frecency-sorted)
 show_history() {
   if [[ -s "$HISTORY_FILE" ]]; then
-    local count
-    count=$(wc -l < "$HISTORY_FILE")
-    local show=$((count < 5 ? count : 5))
     gum style --foreground 8 --faint "recent"
-    tail -n "$show" "$HISTORY_FILE" | tac | while IFS= read -r line; do
+    get_suggestions 5 | while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
       gum style --foreground 8 --faint "  › $line"
     done
     echo ""
@@ -271,7 +290,7 @@ search_history() {
   fi
 
   local selected
-  selected=$(tac "$HISTORY_FILE" | gum filter --placeholder "Search history..." --height 15 --width 60) || return
+  selected=$(cut -f2- "$HISTORY_FILE" | tac | sort -u | gum filter --placeholder "Search history..." --height 15 --width 60) || return
 
   if [[ -n "$selected" ]]; then
     echo ""
