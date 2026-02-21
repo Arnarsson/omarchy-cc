@@ -3,7 +3,7 @@
 # Omarchy Command Center — Voice+text command center for your desktop.
 # Press Super+I to toggle. Type or speak natural language commands.
 
-set -euo pipefail
+set -uo pipefail
 
 CONFIG_DIR="$HOME/.config/omarchy-cc"
 CACHE_DIR="$HOME/.cache/omarchy-cc"
@@ -157,9 +157,9 @@ describe_action() {
 process_input() {
   local input="$1"
 
-  # Route the input (with spinner for non-instant tiers)
+  # Route the input
   local route_output
-  route_output=$(gum spin --spinner dot --title "Thinking..." --show-output -- omarchy-cc-route "$input" 2>/dev/null) || true
+  route_output=$(omarchy-cc-route "$input" 2>/dev/null) || true
 
   if [[ -z "$route_output" ]]; then
     gum style --foreground 1 "✗ Couldn't understand that."
