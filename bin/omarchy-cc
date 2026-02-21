@@ -223,15 +223,6 @@ process_input() {
   omarchy-cc-exec -t "$tier" -i "$input" "$command"
 
   add_history "$input"
-
-  # Show copy action bar
-  echo ""
-  gum style --foreground 8 --faint "  [c] copy all"
-  local key
-  read -rsn1 -t 5 key 2>/dev/null || key=""
-  if [[ "$key" == "c" || "$key" == "C" ]]; then
-    copy_pane
-  fi
 }
 
 # Handle meta-commands: undo, again, last
@@ -354,7 +345,7 @@ main() {
   while true; do
     local input
     input=$(gum input \
-      --placeholder "What do you want to do?" \
+      --placeholder "Type a command (or: copy, undo, help)" \
       --width 60 \
       --char-limit 500 \
       --prompt "> " \
