@@ -163,10 +163,21 @@ speak() {
   fi
 }
 
+# Check if a command is interactive (uses gum prompts, menus, etc.)
+is_interactive() {
+  local cmd="$1"
+  case "$cmd" in
+    omarchy-cc-tmux*|omarchy-menu*|omarchy-pkg-install*|omarchy-pkg-remove*)  return 0 ;;
+    omarchy-theme-set|omarchy-font-set|omarchy-theme-install*|omarchy-theme-remove*) return 0 ;;
+    *gum\ choose*|*gum\ filter*|*gum\ confirm*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Execute a command, log it, save undo state
 execute() {
   local cmd="$1" tier="${2:-unknown}" input="${3:-}"
-  local output exit_code
+  local output="" exit_code
 
   # Capture undo state before running
   local undo
@@ -176,7 +187,13 @@ execute() {
   local start_ms
   start_ms=$(date +%s%3N)
 
-  output=$(eval "$cmd" 2>&1) && exit_code=0 || exit_code=$?
+  if is_interactive "$cmd"; then
+    # Interactive commands: run directly so gum/TUI prompts work
+    eval "$cmd" && exit_code=0 || exit_code=$?
+  else
+    # Non-interactive: capture output
+    output=$(eval "$cmd" 2>&1) && exit_code=0 || exit_code=$?
+  fi
 
   local end_ms
   end_ms=$(date +%s%3N)
@@ -190,8 +207,8 @@ execute() {
   fi
 
   if [[ $exit_code -eq 0 ]]; then
-    # Show "Done" only for commands that produce no output (silent actions)
-    if [[ -z "$output" ]]; then
+    # Show "Done" only for non-interactive commands with no output
+    if [[ -z "$output" ]] && ! is_interactive "$cmd"; then
       gum style --foreground 2 "✓ Done"
     fi
     speak "Done."
