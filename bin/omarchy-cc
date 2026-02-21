@@ -205,6 +205,19 @@ process_input() {
   omarchy-cc-exec -t "$tier" -i "$input" "$command"
 
   add_history "$input"
+
+  # Show copy action bar if there was output
+  if [[ -s "$LAST_OUTPUT_FILE" ]]; then
+    echo ""
+    gum style --foreground 8 --faint --inline "  [c] copy"
+    printf "\n"
+    local key
+    read -rsn1 -t 5 key 2>/dev/null || key=""
+    if [[ "$key" == "c" || "$key" == "C" ]]; then
+      wl-copy < "$LAST_OUTPUT_FILE" 2>/dev/null
+      gum style --foreground 2 "  ✓ Copied"
+    fi
+  fi
 }
 
 # Handle meta-commands: undo, again, last
