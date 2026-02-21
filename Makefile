@@ -1,4 +1,4 @@
-.PHONY: test test-route test-exec test-preprocess test-all
+.PHONY: test test-route test-exec test-preprocess test-integration test-all
 
 test:
 	@bats tests/
@@ -11,3 +11,8 @@ test-route:
 
 test-exec:
 	@bats tests/exec.bats
+
+test-integration:
+	@bash bin/omarchy-cc-test
+
+test-all: test test-integration

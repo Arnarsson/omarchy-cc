@@ -1,0 +1,120 @@
+#!/bin/bash
+# Integration tests for omarchy-cc.
+# Runs actual routing end-to-end (pattern match + preprocessing).
+
+set -uo pipefail
+
+PASS=0
+FAIL=0
+
+assert_route() {
+  local input="$1" expected="$2"
+  local actual
+  actual=$(omarchy-cc-route "$input" 2>/dev/null | tail -1)
+  if [[ "$actual" == "$expected" ]]; then
+    printf "  \033[32m✓\033[0m %s\n" "$input"
+    ((PASS++))
+  else
+    printf "  \033[31m✗\033[0m %s\n" "$input"
+    printf "    expected: %s\n" "$expected"
+    printf "    actual:   %s\n" "$actual"
+    ((FAIL++))
+  fi
+}
+
+assert_route_contains() {
+  local input="$1" expected="$2"
+  local actual
+  actual=$(omarchy-cc-route "$input" 2>/dev/null | tail -1)
+  if [[ "$actual" == *"$expected"* ]]; then
+    printf "  \033[32m✓\033[0m %s\n" "$input"
+    ((PASS++))
+  else
+    printf "  \033[31m✗\033[0m %s\n" "$input"
+    printf "    expected to contain: %s\n" "$expected"
+    printf "    actual: %s\n" "$actual"
+    ((FAIL++))
+  fi
+}
+
+echo ""
+echo "═══ Omarchy CC Integration Tests ═══"
+echo ""
+
+echo "── Theme ──"
+assert_route "set theme tokyo night" 'omarchy-theme-set "tokyo night"'
+assert_route "what theme am i using" "omarchy-theme-current"
+assert_route "list themes" "omarchy-theme-list"
+assert_route "next wallpaper" "omarchy-theme-bg-next"
+
+echo ""
+echo "── Volume ──"
+assert_route "volume up" "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+assert_route "volume down" "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+assert_route "mute" "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+
+echo ""
+echo "── Brightness ──"
+assert_route "brightness up" "brightnessctl set 10%+"
+assert_route "brightness down" "brightnessctl set 10%-"
+assert_route "brightness 75" "brightnessctl set 75%"
+
+echo ""
+echo "── Window Management ──"
+assert_route "fullscreen" "hyprctl dispatch fullscreen"
+assert_route "close window" "hyprctl dispatch killactive"
+assert_route "center window" "hyprctl dispatch centerwindow"
+assert_route "float" "hyprctl dispatch togglefloating"
+assert_route "minimize" "hyprctl dispatch movetospecial"
+assert_route "workspace 3" "hyprctl dispatch workspace 3"
+
+echo ""
+echo "── System ──"
+assert_route "lock screen" "omarchy-lock-screen"
+assert_route "screenshot" "omarchy-cmd-screenshot smart"
+assert_route_contains "storage" "df -h"
+assert_route "what time is it" "date '+%H:%M'"
+assert_route "uptime" "uptime -p"
+assert_route "version" "omarchy-version"
+assert_route "system info" "fastfetch"
+
+echo ""
+echo "── Launch ──"
+assert_route "launch browser" "omarchy-launch-browser"
+assert_route "launch editor" "omarchy-launch-editor"
+assert_route "launch terminal" "uwsm-app -- xdg-terminal-exec"
+
+echo ""
+echo "── Power ──"
+assert_route "reboot" "omarchy-cmd-reboot"
+assert_route "shutdown" "omarchy-cmd-shutdown"
+assert_route "suspend" "systemctl suspend"
+
+echo ""
+echo "── NLP Pipeline (filler stripping + synonyms) ──"
+assert_route "can you please set the theme to catppuccin" 'omarchy-theme-set "catppuccin"'
+assert_route "would you make it louder" "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+assert_route "dim the screen a little bit" "brightnessctl set 10%-"
+assert_route "just turn on the night light" "omarchy-toggle-nightlight"
+assert_route "could you please maximize this window" "hyprctl dispatch fullscreen"
+assert_route "show me all the themes please" "omarchy-theme-list"
+
+echo ""
+echo "── tmux ──"
+assert_route "tmux" "omarchy-cc-tmux"
+assert_route "kill session 3" "omarchy-cc-tmux kill 3"
+assert_route "kill detached sessions" "omarchy-cc-tmux kill detached"
+assert_route "tmux monitor" "omarchy-cc-tmux monitor"
+
+echo ""
+echo "── Passthrough (raw commands) ──"
+assert_route "omarchy-version" "omarchy-version"
+assert_route "hyprctl dispatch workspace 5" "hyprctl dispatch workspace 5"
+
+echo ""
+echo "═══════════════════════════════════════"
+printf "  Passed: \033[32m%d\033[0m  Failed: \033[31m%d\033[0m\n" "$PASS" "$FAIL"
+echo "═══════════════════════════════════════"
+echo ""
+
+[[ $FAIL -eq 0 ]]

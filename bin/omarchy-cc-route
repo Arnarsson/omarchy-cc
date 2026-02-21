@@ -42,7 +42,7 @@ strip_filler() {
   done
 
   # Single-word fillers (only strip when standalone, not inside other words)
-  for word in "the" "this" "that" "my" "its" "it" "me" "now" "currently" "also" "then" "and" "a" "an" "all"; do
+  for word in "the" "this" "that" "my" "its" "it" "me" "now" "currently" "also" "then" "and" "a" "an" "all" "to"; do
     input="${input// $word / }"
   done
 
