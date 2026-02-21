@@ -181,6 +181,42 @@ describe_action() {
   esac
 }
 
+# Suggest similar commands when routing fails
+suggest_similar() {
+  local input="$1"
+  local -a candidates=(
+    "set theme" "list themes" "next wallpaper" "change font"
+    "volume up" "volume down" "mute" "brightness up" "brightness down"
+    "screenshot" "screen record" "fullscreen" "close window" "float"
+    "center window" "minimize" "launch browser" "launch editor"
+    "launch terminal" "toggle nightlight" "toggle waybar"
+    "lock screen" "restart waybar" "restart pipewire"
+    "system info" "battery" "storage" "uptime" "reboot" "shutdown"
+    "switch audio" "tmux" "tmux monitor" "update" "keybindings"
+    "workspace" "share" "menu" "help"
+  )
+  local -a matches=()
+  for candidate in "${candidates[@]}"; do
+    # Check if any word in input appears in the candidate
+    for word in $input; do
+      [[ ${#word} -lt 3 ]] && continue
+      if [[ "$candidate" == *"$word"* ]]; then
+        matches+=("$candidate")
+        break
+      fi
+    done
+  done
+  if [[ ${#matches[@]} -gt 0 ]]; then
+    gum style --foreground 3 "  Did you mean:"
+    local shown=0
+    for m in "${matches[@]}"; do
+      [[ $shown -ge 3 ]] && break
+      gum style --foreground 8 "    › $m"
+      ((shown++))
+    done
+  fi
+}
+
 # Process a single command input
 process_input() {
   local input="$1"
@@ -191,6 +227,7 @@ process_input() {
 
   if [[ -z "$route_output" ]]; then
     gum style --foreground 1 "✗ Couldn't understand that."
+    suggest_similar "$input"
     return 1
   fi
 
@@ -201,6 +238,13 @@ process_input() {
   if [[ "$route_output" == TIER:* ]]; then
     tier=$(echo "$route_output" | head -1 | sed 's/^TIER://')
     command=$(echo "$route_output" | tail -n +2)
+  fi
+
+  # If no tier could handle it, show suggestions
+  if [[ "$tier" == "none" ]]; then
+    gum style --foreground 1 "✗ Couldn't figure out how to do that."
+    suggest_similar "$input"
+    return 1
   fi
 
   # Show compact feedback: → Description ─ command

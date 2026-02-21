@@ -211,6 +211,20 @@ execute() {
     speak "Command failed."
   fi
 
+  # Desktop notification for long-running commands (>3s)
+  if [[ $duration_ms -gt 3000 ]] && command -v notify-send &>/dev/null; then
+    local summary="Command Center"
+    local body icon
+    if [[ $exit_code -eq 0 ]]; then
+      body="✓ $input (${duration_ms}ms)"
+      icon="dialog-information"
+    else
+      body="✗ $input failed (exit $exit_code)"
+      icon="dialog-error"
+    fi
+    notify-send -a "Command Center" -i "$icon" "$summary" "$body" 2>/dev/null &
+  fi
+
   # Log and save state
   log_entry "$tier" "$input" "$cmd" "$exit_code" "$duration_ms" "$output"
   save_last_action "$input" "$cmd" "$undo" "$exit_code"
