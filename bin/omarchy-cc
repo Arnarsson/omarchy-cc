@@ -184,15 +184,15 @@ process_input() {
     command=$(echo "$route_output" | tail -n +2)
   fi
 
-  # Show human-readable feedback
+  # Show compact feedback: → Description ─ command
   local description
   description=$(describe_action "$command")
 
   if [[ -n "$description" ]]; then
-    gum style --foreground 2 --bold "→ $description"
+    gum style --foreground 2 --bold "→ $description" --foreground 8 " ─ $command"
+  else
+    gum style --foreground 8 --faint "  $command"
   fi
-  gum style --foreground 8 --faint "  $command"
-  echo ""
 
   # For Claude tier with multi-line output, show and confirm
   if [[ "$tier" == "claude" ]]; then

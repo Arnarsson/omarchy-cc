@@ -191,19 +191,22 @@ execute() {
 
   if [[ -n "$output" ]]; then
     echo "$output"
-    # Save output for "copy" command
     echo "$output" > "$CACHE_DIR/last-output"
     echo "$output" >> "$CACHE_DIR/session-output"
   fi
 
+  # Emit machine-readable status on fd 3 (if open) for the TUI to parse
+  if { true >&3; } 2>/dev/null; then
+    echo "CC_STATUS:exit=$exit_code:ms=$duration_ms" >&3
+  fi
+
   if [[ $exit_code -eq 0 ]]; then
-    # Show "Done" only for non-interactive commands with no output
     if [[ -z "$output" ]] && ! is_interactive "$cmd"; then
-      gum style --foreground 2 "✓ Done"
+      gum style --foreground 2 "✓ Done (${duration_ms}ms)"
     fi
     speak "Done."
   else
-    gum style --foreground 1 "✗ Failed (exit $exit_code)"
+    gum style --foreground 1 "✗ Failed (exit $exit_code, ${duration_ms}ms)"
     speak "Command failed."
   fi
 
