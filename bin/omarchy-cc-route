@@ -1,0 +1,571 @@
+#!/bin/bash
+
+# Route natural language input to the appropriate omarchy command.
+# Tier 1: Pattern matching (instant). Tier 2: Ollama (fast). Tier 3: Claude CLI (complex).
+
+set -euo pipefail
+
+CONFIG_DIR="$HOME/.config/omarchy-cc"
+CACHE_DIR="$HOME/.cache/omarchy-cc"
+
+# Read config
+read_config() {
+  local key="$1" default="$2"
+  if [[ -f "$CONFIG_DIR/config.toml" ]]; then
+    local val
+    val=$(grep "^${key}\s*=" "$CONFIG_DIR/config.toml" 2>/dev/null | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | xargs)
+    [[ -n "$val" ]] && echo "$val" || echo "$default"
+  else
+    echo "$default"
+  fi
+}
+
+OLLAMA_MODEL=$(read_config "ollama_model" "qwen2.5-coder:7b")
+CLAUDE_ENABLED=$(read_config "claude_enabled" "true")
+
+# Normalize input: lowercase, trim whitespace
+normalize() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/[[:space:]]\+/ /g'
+}
+
+# Gather current desktop context for smarter LLM routing
+gather_context() {
+  local ctx=""
+
+  # Current theme
+  local theme
+  theme=$(omarchy-theme-current 2>/dev/null || echo "unknown")
+  ctx+="Current theme: $theme"$'\n'
+
+  # Current audio output
+  local sink_name sink_desc
+  sink_name=$(pactl get-default-sink 2>/dev/null || echo "")
+  if [[ -n "$sink_name" ]]; then
+    sink_desc=$(pactl -f json list sinks 2>/dev/null | jq -r --arg n "$sink_name" '.[] | select(.name == $n) | .description' 2>/dev/null || echo "$sink_name")
+    ctx+="Current audio output: $sink_desc"$'\n'
+  fi
+
+  # Active window
+  local active_class active_title
+  active_class=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' 2>/dev/null || echo "")
+  active_title=$(hyprctl activewindow -j 2>/dev/null | jq -r '.title // empty' 2>/dev/null || echo "")
+  [[ -n "$active_class" ]] && ctx+="Active window: $active_class — $active_title"$'\n'
+
+  # Current workspace
+  local ws_id
+  ws_id=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty' 2>/dev/null || echo "")
+  [[ -n "$ws_id" ]] && ctx+="Current workspace: $ws_id"$'\n'
+
+  # Monitor count
+  local mon_count
+  mon_count=$(hyprctl monitors -j 2>/dev/null | jq 'length' 2>/dev/null || echo "1")
+  ctx+="Monitors: $mon_count"$'\n'
+
+  # Current font
+  local font
+  font=$(omarchy-font-current 2>/dev/null || echo "unknown")
+  ctx+="Current font: $font"$'\n'
+
+  echo "$ctx"
+}
+
+# Match a keyword against available audio sinks and output the pactl command to set it.
+# Searches description, alias, form_factor, port descriptions, and known brand mappings.
+audio_set_sink() {
+  local keyword="$1"
+  local sinks_json
+  sinks_json=$(pactl -f json list sinks 2>/dev/null) || return 1
+
+  # First: try matching the description directly
+  local sink_name
+  sink_name=$(echo "$sinks_json" \
+    | jq -r --arg kw "$keyword" '.[] | select(.description | test($kw; "i")) | .name' \
+    | head -1)
+
+  # Second: search across all useful properties (alias, form_factor, port descriptions, icon)
+  if [[ -z "$sink_name" ]]; then
+    sink_name=$(echo "$sinks_json" \
+      | jq -r --arg kw "$keyword" '
+        .[] | select(
+          (.description | test($kw; "i")) or
+          (.properties["device.alias"] // "" | test($kw; "i")) or
+          (.properties["device.form_factor"] // "" | test($kw; "i")) or
+          (.properties["device.icon_name"] // "" | test($kw; "i")) or
+          (.properties["api.bluez5.address"] // "" | test($kw; "i")) or
+          ([.ports[]?.description // ""] | any(test($kw; "i")))
+        ) | .name' \
+      | head -1)
+  fi
+
+  # Third: try known brand → product mappings
+  if [[ -z "$sink_name" ]]; then
+    local expanded="$keyword"
+    case "$keyword" in
+      sony*)    expanded="(sony|wh-|wf-|mdr-|srs-)" ;;
+      bose*)    expanded="(bose|qc|quietcomfort|soundlink)" ;;
+      apple*)   expanded="(apple|airpod|homepod)" ;;
+      airpod*)  expanded="(airpod)" ;;
+      samsung*) expanded="(samsung|galaxy buds)" ;;
+      jbl*)     expanded="(jbl)" ;;
+      jabra*)   expanded="(jabra|elite)" ;;
+      hdmi*)    expanded="(hdmi)" ;;
+      usb*)     expanded="(usb)" ;;
+      built*in*|internal*|laptop*) expanded="(built.in|internal|speaker)" ;;
+      bluetooth*|bt) expanded="(bluez|bluetooth)" ;;
+      headphone*|headset*) expanded="(headphone|headset)" ;;
+      speaker*) expanded="(speaker|analog)" ;;
+    esac
+    if [[ "$expanded" != "$keyword" ]]; then
+      sink_name=$(echo "$sinks_json" \
+        | jq -r --arg kw "$expanded" '
+          .[] | select(
+            (.description | test($kw; "i")) or
+            (.name | test($kw; "i")) or
+            (.properties["device.alias"] // "" | test($kw; "i")) or
+            (.properties["device.icon_name"] // "" | test($kw; "i")) or
+            (.properties["device.form_factor"] // "" | test($kw; "i"))
+          ) | .name' \
+        | head -1)
+    fi
+  fi
+
+  if [[ -n "$sink_name" ]]; then
+    echo "pactl set-default-sink '$sink_name'"
+    return 0
+  fi
+  return 1
+}
+
+# Extract the device keyword from various phrasings
+extract_audio_device() {
+  local input="$1"
+  local result
+  result=$(echo "$input" \
+    | sed -E 's/^(set |switch |change |use |output )?(audio|sound|output)? ?(to |on |device )?(the |my )?//i' \
+    | xargs)
+
+  # If the entire remaining string is a generic device type, keep it as-is (for form_factor matching)
+  case "$result" in
+    headphones|headphone|headset|earbuds|earphones|speakers|speaker) echo "$result" ; return ;;
+  esac
+
+  # Otherwise strip trailing device type words to isolate the brand/model
+  echo "$result" \
+    | sed -E 's/ ?(output|device|speaker|speakers|headphone|headphones|headset|earbuds|earphones)$//i' \
+    | xargs
+}
+
+# Tier 1: Pattern matching — instant, handles 80% of use cases
+pattern_match() {
+  local input="$1"
+
+  case "$input" in
+    # Theme
+    "set theme "*)       echo "omarchy-theme-set \"${input#set theme }\"" ;;
+    "change theme to "*) echo "omarchy-theme-set \"${input#change theme to }\"" ;;
+    "change theme "*)    echo "omarchy-theme-set \"${input#change theme }\"" ;;
+    "switch theme")      echo "omarchy-theme-set" ;;
+    "next theme")        echo "omarchy-theme-set" ;;
+    "what theme"*|"current theme"*|"which theme"*) echo "omarchy-theme-current" ;;
+    "list theme"*|"show theme"*) echo "omarchy-theme-list" ;;
+    "install theme"*)    echo "omarchy-theme-install" ;;
+    "remove theme"*)     echo "omarchy-theme-remove" ;;
+
+    # Wallpaper
+    "next wallpaper"|"change wallpaper"|"new wallpaper"|"next background"|"change background"|"new background"|"next bg")
+      echo "omarchy-theme-bg-next" ;;
+
+    # Font
+    "set font "*)        echo "omarchy-font-set \"${input#set font }\"" ;;
+    "change font "*)     echo "omarchy-font-set \"${input#change font }\"" ;;
+    "what font"*|"current font"*|"which font"*) echo "omarchy-font-current" ;;
+    "list font"*|"show font"*) echo "omarchy-font-list" ;;
+
+    # Audio
+    "volume up"|"louder"|"turn up"*) echo "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+" ;;
+    "volume down"|"quieter"|"turn down"*) echo "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" ;;
+    "mute"|"toggle mute") echo "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" ;;
+    "unmute")            echo "wpctl set-mute @DEFAULT_AUDIO_SINK@ 0" ;;
+    "switch audio"|"audio switch"|"next audio"|"change output")
+      echo "omarchy-cmd-audio-switch" ;;
+    "audio"*"settings"|"open audio"|"sound settings"|"audio controls")
+      echo "omarchy-launch-audio" ;;
+    # Set specific audio output device
+    "set audio "* | "set output "* | "set sound "* | \
+    "switch audio to "* | "switch output to "* | "switch to "* | \
+    "change audio to "* | "change output to "* | \
+    "use "*" headphones" | "use "*" speaker"* | "use "*" headset" | \
+    "audio to "* | "output to "* | "sound to "* | \
+    "audio output "* | "sound output "*)
+      local device
+      device=$(extract_audio_device "$input")
+      if [[ -n "$device" ]]; then
+        local cmd
+        if cmd=$(audio_set_sink "$device"); then
+          echo "$cmd"
+        else
+          echo "echo 'No audio device matching \"$device\" found. Available:' && pactl -f json list sinks | jq -r '.[].description'"
+        fi
+      else
+        echo "omarchy-cmd-audio-switch"
+      fi
+      ;;
+
+    # Display
+    "toggle nightlight"|"nightlight"|"night light"|"blue light"*)
+      echo "omarchy-toggle-nightlight" ;;
+    "brightness up"|"brighter")   echo "brightnessctl set 10%+" ;;
+    "brightness down"|"dimmer")   echo "brightnessctl set 10%-" ;;
+    "brightness "*)
+      local val="${input#brightness }"
+      val="${val%\%}"
+      echo "brightnessctl set ${val}%" ;;
+
+    # Screenshot / Recording
+    "screenshot"|"take screenshot"|"snap"|"capture screen")
+      echo "omarchy-cmd-screenshot smart" ;;
+    "screenshot area"|"screenshot region"|"snip")
+      echo "omarchy-cmd-screenshot smart" ;;
+    "screenshot full"|"full screenshot")
+      echo "omarchy-cmd-screenshot smart clipboard" ;;
+    "screen record"*|"screenrecord"*|"record screen"*)
+      echo "omarchy-cmd-screenrecord" ;;
+
+    # Launching apps
+    "launch browser"|"open browser") echo "omarchy-launch-browser" ;;
+    "launch editor"|"open editor")   echo "omarchy-launch-editor" ;;
+    "launch terminal"|"open terminal"|"new terminal")
+      echo "uwsm-app -- xdg-terminal-exec" ;;
+    "launch file"*|"open file"*|"files")
+      echo "uwsm-app -- nautilus --new-window" ;;
+    "launch "*)
+      local app="${input#launch }"
+      echo "omarchy-launch-or-focus \"$app\" || hyprctl dispatch exec \"$app\"" ;;
+    "open "*)
+      local app="${input#open }"
+      echo "omarchy-launch-or-focus \"$app\" || hyprctl dispatch exec \"$app\"" ;;
+
+    # Window management (hyprctl dispatch)
+    "fullscreen"|"toggle fullscreen"|"maximize"|"full screen")
+      echo "hyprctl dispatch fullscreen" ;;
+    "float"|"floating"|"toggle float"*|"toggle floating")
+      echo "hyprctl dispatch togglefloating" ;;
+    "center window"|"center")
+      echo "hyprctl dispatch centerwindow" ;;
+    "close"|"close window"|"kill window")
+      echo "hyprctl dispatch killactive" ;;
+    "minimize"|"minimise")
+      echo "hyprctl dispatch movetospecial" ;;
+    "workspace "*)
+      local ws="${input#workspace }"
+      echo "hyprctl dispatch workspace $ws" ;;
+    "move to workspace "*)
+      local ws="${input#move to workspace }"
+      echo "hyprctl dispatch movetoworkspace $ws" ;;
+    "move window to "*)
+      local ws="${input#move window to }"
+      echo "hyprctl dispatch movetoworkspace $ws" ;;
+
+    # System
+    "lock"|"lock screen")   echo "omarchy-lock-screen" ;;
+    "screensaver")          echo "omarchy-launch-screensaver force" ;;
+    "toggle waybar"|"toggle bar"|"hide bar"|"show bar")
+      echo "omarchy-toggle-waybar" ;;
+    "toggle gaps"|"gaps")   echo "omarchy-hyprland-workspace-toggle-gaps" ;;
+    "close all"*"window"*)  echo "omarchy-hyprland-window-close-all" ;;
+    "pop window"|"pop out"|"pin window")
+      echo "omarchy-hyprland-window-pop" ;;
+
+    # Restart services
+    "restart waybar")       echo "omarchy-restart-waybar" ;;
+    "restart pipewire"|"restart audio") echo "omarchy-restart-pipewire" ;;
+    "restart wifi")         echo "omarchy-restart-wifi" ;;
+    "restart bluetooth")    echo "omarchy-restart-bluetooth" ;;
+    "restart walker")       echo "omarchy-restart-walker" ;;
+    "restart "*)
+      local svc="${input#restart }"
+      echo "omarchy-restart-$svc" ;;
+
+    # Info queries
+    "what time"*|"time")    echo "date '+%H:%M'" ;;
+    "what date"*|"date"|"today"*) echo "date '+%A, %B %d %Y'" ;;
+    "uptime")               echo "uptime -p" ;;
+    "battery"|"battery life"|"battery remaining")
+      echo "omarchy-battery-remaining" ;;
+    "version"|"omarchy version") echo "omarchy-version" ;;
+    "about")                echo "omarchy-launch-about" ;;
+    "system info"|"sysinfo"|"specs") echo "fastfetch" ;;
+
+    # Power
+    "reboot"|"restart computer"|"restart system") echo "omarchy-cmd-reboot" ;;
+    "shutdown"|"power off"|"shut down") echo "omarchy-cmd-shutdown" ;;
+    "suspend"|"sleep")      echo "systemctl suspend" ;;
+
+    # Bluetooth / WiFi
+    "bluetooth"*"setting"*|"bluetooth") echo "omarchy-launch-bluetooth" ;;
+    "wifi"*"setting"*|"wifi") echo "omarchy-launch-wifi" ;;
+
+    # Package management
+    "install package"*|"install pkg"*) echo "omarchy-pkg-install" ;;
+    "remove package"*|"remove pkg"*|"uninstall"*) echo "omarchy-pkg-remove" ;;
+    "update"|"update system"|"update omarchy") echo "omarchy-update" ;;
+
+    # Menu
+    "menu")                 echo "omarchy-menu" ;;
+    "settings"|"preferences"|"setup") echo "omarchy-menu setup" ;;
+    "keybindings"|"key bindings"|"shortcuts")
+      echo "omarchy-menu-keybindings" ;;
+
+    # Sharing
+    "share"|"share clipboard") echo "omarchy-cmd-share clipboard" ;;
+    "share file")           echo "omarchy-cmd-share file" ;;
+
+    # Dictation
+    "dictation status"|"voxtype status") echo "omarchy-voxtype-status" ;;
+
+    # No match
+    *) return 1 ;;
+  esac
+}
+
+# Build the system prompt for Ollama with current desktop context
+build_ollama_prompt() {
+  local context="$1"
+
+  cat <<SYSPROMPT
+You are a command router for Omarchy, a Linux desktop environment on Arch Linux with Hyprland.
+Your job: convert natural language requests into a SINGLE shell command.
+
+CURRENT SYSTEM STATE:
+$context
+RULES:
+- Output ONLY the shell command. Nothing else. No explanation, no markdown, no backticks.
+- If you need to chain commands, use && or ;
+- Prefer omarchy-* commands when they exist for the task.
+- For unknown requests, use standard Linux commands.
+- If you truly cannot determine a command, output: echo "I don't know how to do that"
+- Use the current system state to give context-aware answers (e.g. if asked "what theme am I using", you already know).
+
+AVAILABLE OMARCHY COMMANDS:
+omarchy-theme-set <name> — Set the desktop theme
+omarchy-theme-current — Show current theme name
+omarchy-theme-list — List available themes
+omarchy-theme-bg-next — Cycle to next wallpaper
+omarchy-theme-install — Install a new theme
+omarchy-theme-remove — Remove a theme
+omarchy-font-set <name> — Set the system monospace font
+omarchy-font-current — Show current font
+omarchy-font-list — List available fonts
+omarchy-toggle-nightlight — Toggle blue light filter
+omarchy-toggle-screensaver — Toggle screensaver
+omarchy-toggle-idle — Toggle idle lock
+omarchy-toggle-waybar — Toggle the top bar
+omarchy-toggle-suspend — Toggle suspend capability
+omarchy-lock-screen — Lock the screen
+omarchy-launch-browser — Launch default browser
+omarchy-launch-editor — Launch default editor
+omarchy-launch-audio — Launch audio controls
+omarchy-launch-bluetooth — Launch bluetooth settings
+omarchy-launch-about — Show system info
+omarchy-launch-or-focus <app> — Launch or focus an app
+omarchy-launch-webapp <url> — Launch a URL as a web app
+omarchy-launch-screensaver force — Start the screensaver
+omarchy-cmd-audio-switch — Cycle to next audio output device
+omarchy-cmd-screenshot smart — Take a screenshot
+omarchy-cmd-screenrecord — Record the screen
+omarchy-cmd-share clipboard|file|folder — Share via LocalSend
+omarchy-cmd-reboot — Reboot the system
+omarchy-cmd-shutdown — Shutdown the system
+omarchy-cmd-apple-display-brightness <0-100> — Set Apple display brightness
+omarchy-battery-remaining — Show battery percentage
+omarchy-version — Show Omarchy version
+omarchy-pkg-install — Interactive package installer (fzf TUI)
+omarchy-pkg-remove — Interactive package remover (fzf TUI)
+omarchy-pkg-add <pkg> — Install a specific package
+omarchy-pkg-drop <pkg> — Remove a specific package
+omarchy-update — Update Omarchy and system
+omarchy-restart-waybar — Restart the top bar
+omarchy-restart-pipewire — Restart audio system
+omarchy-restart-wifi — Restart Wi-Fi
+omarchy-restart-bluetooth — Restart Bluetooth
+omarchy-restart-walker — Restart app launcher
+omarchy-menu — Open the Omarchy menu
+omarchy-menu-keybindings — Show keybinding reference
+omarchy-hyprland-workspace-toggle-gaps — Toggle window gaps
+omarchy-hyprland-window-close-all — Close all windows
+omarchy-hyprland-window-pop — Pop/pin current window
+omarchy-debug — Show debug info
+omarchy-voxtype-status — Show dictation status
+omarchy-install-dev-env <lang> — Install dev environment (ruby, node, python, go, rust, etc.)
+omarchy-refresh-hyprland — Reset Hyprland config to defaults
+omarchy-refresh-waybar — Reset Waybar config to defaults
+
+AUDIO DEVICE SELECTION:
+pactl set-default-sink '<sink_name>' — Set a specific audio output
+pactl -f json list sinks | jq -r '.[].description' — List available audio outputs
+To switch to a specific device, find its name with: pactl -f json list sinks | jq -r '.[] | select(.description | test("<keyword>"; "i")) | .name'
+
+OTHER USEFUL COMMANDS:
+hyprctl dispatch exec <app> — Launch an application
+hyprctl dispatch workspace <n> — Switch to workspace
+hyprctl dispatch movetoworkspace <n> — Move window to workspace
+hyprctl dispatch fullscreen — Toggle fullscreen
+hyprctl dispatch togglefloating — Toggle floating mode
+hyprctl monitors — List monitors
+hyprctl clients — List open windows
+wpctl set-volume @DEFAULT_AUDIO_SINK@ <N%+/-> — Change volume
+wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle — Toggle mute
+brightnessctl set <N%+/-> — Change brightness
+systemctl suspend — Suspend the system
+date — Show date/time
+uptime -p — Show uptime
+fastfetch — Show system info
+SYSPROMPT
+}
+
+# Tier 2: Ollama fast path
+ollama_route() {
+  local input="$1" context="$2"
+
+  if ! command -v ollama &>/dev/null; then
+    return 1
+  fi
+
+  local system_prompt
+  system_prompt=$(build_ollama_prompt "$context")
+
+  local result
+  result=$(ollama run "$OLLAMA_MODEL" --nowordwrap "$system_prompt
+
+User request: $input" 2>/dev/null | tr -d '`' | sed '/^$/d' | head -5)
+
+  # Validate: should look like a command, not prose
+  if [[ -z "$result" ]]; then
+    return 1
+  fi
+
+  # Strip markdown code fences if present
+  result=$(echo "$result" | sed 's/^```[a-z]*//;s/^```$//' | sed '/^$/d')
+
+  local first_line
+  first_line=$(echo "$result" | head -1)
+
+  # Heuristic: valid commands start with a known command/path or omarchy-*
+  if echo "$first_line" | grep -qE '^(omarchy-|hyprctl|wpctl|pactl|brightnessctl|systemctl|date|uptime|fastfetch|echo|cat|ls|df|free|uname|whoami|hostname|sudo|pacman|yay|notify-send|uwsm-app|setsid|kill|pkill|pidof|xdg-|walker|/|~)'; then
+    echo "$result"
+    return 0
+  fi
+
+  # Also accept if it looks like a pipe or redirect chain
+  if echo "$first_line" | grep -qE '^[a-zA-Z0-9_/.-]+ '; then
+    echo "$result"
+    return 0
+  fi
+
+  return 1
+}
+
+# Tier 3: Claude CLI slow path
+claude_route() {
+  local input="$1" context="$2"
+
+  if [[ "$CLAUDE_ENABLED" != "true" ]] || ! command -v claude &>/dev/null; then
+    return 1
+  fi
+
+  local system_prompt
+  system_prompt=$(build_ollama_prompt "$context")
+  system_prompt="$system_prompt
+
+ADDITIONAL INSTRUCTIONS FOR COMPLEX TASKS:
+- You can output multi-line scripts for complex tasks
+- Chain commands with && for sequential execution
+- Use bash constructs like for loops, if statements, etc.
+- For file creation tasks, use cat with heredocs
+- Always output executable shell commands, never explanations"
+
+  local result
+  result=$(claude -p --output-format text --system-prompt "$system_prompt" "$input" 2>/dev/null)
+
+  if [[ -z "$result" ]]; then
+    return 1
+  fi
+
+  echo "$result"
+}
+
+# Check if this should be routed to Claude (complex task indicators)
+needs_claude() {
+  local input="$1"
+  case "$input" in
+    *"write a script"*|*"create a script"*|*"make a script"*) return 0 ;;
+    *"write a"*|*"create a"*|*"generate"*) return 0 ;;
+    *"use claude"*|*"think harder"*|*"think about"*) return 0 ;;
+    *"explain"*|*"help me"*|*"how do i"*|*"how to"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Main routing logic
+main() {
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: omarchy-cc-route <natural language input>" >&2
+    exit 1
+  fi
+
+  local raw_input="$*"
+  local input
+  input=$(normalize "$raw_input")
+
+  # Empty input
+  if [[ -z "$input" ]]; then
+    exit 1
+  fi
+
+  # If input already looks like a command, pass it through
+  if echo "$input" | grep -qE '^(omarchy-|hyprctl |wpctl |pactl |brightnessctl |systemctl |sudo )'; then
+    echo "$raw_input"
+    exit 0
+  fi
+
+  # Tier 1: Pattern matching (instant)
+  local result
+  if result=$(pattern_match "$input"); then
+    echo "$result"
+    exit 0
+  fi
+
+  # Gather context for LLM tiers (only when needed)
+  local context
+  context=$(gather_context 2>/dev/null || echo "")
+
+  # Check if this needs Claude (complex task)
+  if needs_claude "$input"; then
+    if result=$(claude_route "$raw_input" "$context"); then
+      echo "TIER:claude"
+      echo "$result"
+      exit 0
+    fi
+  fi
+
+  # Tier 2: Ollama fast path
+  if result=$(ollama_route "$raw_input" "$context"); then
+    echo "TIER:ollama"
+    echo "$result"
+    exit 0
+  fi
+
+  # Tier 3: Claude CLI fallback
+  if result=$(claude_route "$raw_input" "$context"); then
+    echo "TIER:claude"
+    echo "$result"
+    exit 0
+  fi
+
+  # Nothing worked
+  echo "TIER:none"
+  echo "echo \"Sorry, I couldn't figure out how to do that.\""
+  exit 0
+}
+
+main "$@"

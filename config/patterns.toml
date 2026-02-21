@@ -1,0 +1,122 @@
+# Pattern rules for the Command Center intent router
+# Format: pattern = "command"
+# Patterns use simple glob matching (* = any text)
+# $1, $2 etc. refer to captured * groups
+
+[theme]
+"set theme *" = 'omarchy-theme-set "$1"'
+"switch theme" = "omarchy-theme-next 2>/dev/null || omarchy-theme-set"
+"next theme" = "omarchy-theme-next 2>/dev/null || omarchy-theme-set"
+"change theme *" = 'omarchy-theme-set "$1"'
+"what theme" = "omarchy-theme-current"
+"current theme" = "omarchy-theme-current"
+"list themes" = "omarchy-theme-list"
+"show themes" = "omarchy-theme-list"
+"install theme" = "omarchy-theme-install"
+
+[wallpaper]
+"next wallpaper" = "omarchy-theme-bg-next"
+"change wallpaper" = "omarchy-theme-bg-next"
+"next background" = "omarchy-theme-bg-next"
+"change background" = "omarchy-theme-bg-next"
+"new wallpaper" = "omarchy-theme-bg-next"
+
+[font]
+"set font *" = 'omarchy-font-set "$1"'
+"change font *" = 'omarchy-font-set "$1"'
+"what font" = "omarchy-font-current"
+"current font" = "omarchy-font-current"
+"list fonts" = "omarchy-font-list"
+"show fonts" = "omarchy-font-list"
+
+[audio]
+"volume up" = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+"volume down" = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+"mute" = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+"unmute" = "wpctl set-mute @DEFAULT_AUDIO_SINK@ 0"
+"toggle mute" = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+"switch audio" = "omarchy-cmd-audio-switch"
+"audio switch" = "omarchy-cmd-audio-switch"
+"audio settings" = "omarchy-launch-audio"
+"open audio" = "omarchy-launch-audio"
+
+[display]
+"toggle nightlight" = "omarchy-toggle-nightlight"
+"nightlight on" = "omarchy-toggle-nightlight"
+"nightlight off" = "omarchy-toggle-nightlight"
+"night light" = "omarchy-toggle-nightlight"
+"brightness up" = "brightnessctl set 10%+"
+"brightness down" = "brightnessctl set 10%-"
+"brightness *" = 'brightnessctl set "$1%"'
+
+[screenshot]
+"screenshot" = "omarchy-cmd-screenshot smart"
+"take screenshot" = "omarchy-cmd-screenshot smart"
+"screenshot area" = "omarchy-cmd-screenshot smart"
+"screenshot full" = "omarchy-cmd-screenshot smart clipboard"
+"screen record" = "omarchy-cmd-screenrecord"
+"screenrecord" = "omarchy-cmd-screenrecord"
+
+[apps]
+"launch browser" = "omarchy-launch-browser"
+"open browser" = "omarchy-launch-browser"
+"launch editor" = "omarchy-launch-editor"
+"open editor" = "omarchy-launch-editor"
+"launch terminal" = "uwsm-app -- xdg-terminal-exec"
+"open terminal" = "uwsm-app -- xdg-terminal-exec"
+"launch *" = 'omarchy-launch-or-focus "$1" || hyprctl dispatch exec "$1"'
+"open *" = 'omarchy-launch-or-focus "$1" || hyprctl dispatch exec "$1"'
+
+[system]
+"lock" = "omarchy-lock-screen"
+"lock screen" = "omarchy-lock-screen"
+"restart waybar" = "omarchy-restart-waybar"
+"restart pipewire" = "omarchy-restart-pipewire"
+"restart audio" = "omarchy-restart-pipewire"
+"restart wifi" = "omarchy-restart-wifi"
+"restart bluetooth" = "omarchy-restart-bluetooth"
+"toggle waybar" = "omarchy-toggle-waybar"
+"toggle bar" = "omarchy-toggle-waybar"
+"hide bar" = "omarchy-toggle-waybar"
+"show bar" = "omarchy-toggle-waybar"
+"screensaver" = "omarchy-launch-screensaver force"
+"toggle gaps" = "omarchy-hyprland-workspace-toggle-gaps"
+"close all windows" = "omarchy-hyprland-window-close-all"
+
+[info]
+"what time" = "date '+%H:%M'"
+"time" = "date '+%H:%M'"
+"date" = "date '+%A, %B %d %Y'"
+"what date" = "date '+%A, %B %d %Y'"
+"uptime" = "uptime -p"
+"battery" = "omarchy-battery-remaining"
+"version" = "omarchy-version"
+"about" = "omarchy-launch-about"
+"system info" = "fastfetch"
+
+[power]
+"reboot" = "omarchy-cmd-reboot"
+"restart" = "omarchy-cmd-reboot"
+"shutdown" = "omarchy-cmd-shutdown"
+"power off" = "omarchy-cmd-shutdown"
+"suspend" = "systemctl suspend"
+"sleep" = "systemctl suspend"
+
+[bluetooth]
+"bluetooth" = "omarchy-launch-bluetooth"
+"bluetooth settings" = "omarchy-launch-bluetooth"
+
+[wifi]
+"wifi" = "omarchy-launch-wifi"
+"wifi settings" = "omarchy-launch-wifi"
+
+[packages]
+"install *" = 'omarchy-pkg-install'
+"remove *" = 'omarchy-pkg-remove'
+"update" = "omarchy-update"
+"update system" = "omarchy-update"
+
+[menu]
+"menu" = "omarchy-menu"
+"settings" = "omarchy-menu setup"
+"preferences" = "omarchy-menu setup"

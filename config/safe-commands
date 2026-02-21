@@ -1,0 +1,114 @@
+# Commands that are safe to auto-execute (prefix matching)
+# Lines starting with # are comments
+
+# Appearance
+omarchy-theme-current
+omarchy-theme-list
+omarchy-theme-set
+omarchy-theme-bg-next
+omarchy-theme-set-browser
+omarchy-theme-set-gnome
+omarchy-theme-set-obsidian
+omarchy-theme-set-vscode
+omarchy-font-current
+omarchy-font-list
+omarchy-font-set
+
+# Toggles
+omarchy-toggle-nightlight
+omarchy-toggle-screensaver
+omarchy-toggle-idle
+omarchy-toggle-waybar
+omarchy-toggle-suspend
+
+# Launching
+omarchy-launch-about
+omarchy-launch-audio
+omarchy-launch-bluetooth
+omarchy-launch-browser
+omarchy-launch-editor
+omarchy-launch-or-focus
+omarchy-launch-or-focus-tui
+omarchy-launch-or-focus-webapp
+omarchy-launch-screensaver
+omarchy-launch-tui
+omarchy-launch-walker
+omarchy-launch-webapp
+
+# Info/read-only
+omarchy-version
+omarchy-version-branch
+omarchy-version-channel
+omarchy-version-pkgs
+omarchy-battery-remaining
+omarchy-powerprofiles-list
+omarchy-font-list
+omarchy-theme-list
+omarchy-debug
+omarchy-cmd-terminal-cwd
+omarchy-menu-keybindings
+omarchy-pkg-missing
+omarchy-pkg-present
+omarchy-cmd-present
+omarchy-cmd-missing
+omarchy-hibernation-available
+omarchy-voxtype-status
+omarchy-update-available
+omarchy-drive-info
+
+# Lock/screensaver
+omarchy-lock-screen
+omarchy-cmd-screensaver
+
+# Audio (PipeWire/WirePlumber)
+wpctl
+pactl
+
+# Screenshots
+omarchy-cmd-screenshot
+omarchy-cmd-screenrecord
+
+# Window management
+hyprctl dispatch
+hyprctl monitors
+hyprctl clients
+hyprctl activewindow
+hyprctl workspaces
+
+# Brightness
+brightnessctl
+omarchy-cmd-apple-display-brightness
+
+# Hyprland workspace
+omarchy-hyprland-workspace-toggle-gaps
+omarchy-hyprland-window-pop
+
+# Sharing
+omarchy-cmd-share
+
+# Notification
+omarchy-notification-dismiss
+
+# Read-only system commands
+date
+cal
+uptime
+whoami
+hostname
+uname
+df
+free
+sensors
+fastfetch
+neofetch
+echo
+printf
+ls
+cat
+head
+tail
+wc
+which
+type
+file
+stat

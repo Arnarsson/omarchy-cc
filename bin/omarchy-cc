@@ -1,0 +1,346 @@
+#!/bin/bash
+
+# Omarchy Command Center — Voice+text command center for your desktop.
+# Press Super+I to toggle. Type or speak natural language commands.
+
+set -euo pipefail
+
+CONFIG_DIR="$HOME/.config/omarchy-cc"
+CACHE_DIR="$HOME/.cache/omarchy-cc"
+HISTORY_FILE="$CACHE_DIR/history"
+LOG_FILE="$CACHE_DIR/cc.log"
+LAST_ACTION_FILE="$CACHE_DIR/last-action"
+
+mkdir -p "$CACHE_DIR"
+touch "$HISTORY_FILE"
+
+# Read config value
+read_config() {
+  local key="$1" default="$2"
+  if [[ -f "$CONFIG_DIR/config.toml" ]]; then
+    local val
+    val=$(grep "^${key}\s*=" "$CONFIG_DIR/config.toml" 2>/dev/null | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | xargs)
+    [[ -n "$val" ]] && echo "$val" || echo "$default"
+  else
+    echo "$default"
+  fi
+}
+
+HISTORY_SIZE=$(read_config "history_size" "100")
+
+# Add to history
+add_history() {
+  local entry="$1"
+  [[ -z "$entry" ]] && return
+  local last
+  last=$(tail -1 "$HISTORY_FILE" 2>/dev/null || true)
+  [[ "$last" == "$entry" ]] && return
+  echo "$entry" >> "$HISTORY_FILE"
+  local count
+  count=$(wc -l < "$HISTORY_FILE")
+  if [[ $count -gt $HISTORY_SIZE ]]; then
+    local excess=$((count - HISTORY_SIZE))
+    tail -n +"$((excess + 1))" "$HISTORY_FILE" > "$HISTORY_FILE.tmp" && mv "$HISTORY_FILE.tmp" "$HISTORY_FILE"
+  fi
+}
+
+# Show recent history
+show_history() {
+  if [[ -s "$HISTORY_FILE" ]]; then
+    local count
+    count=$(wc -l < "$HISTORY_FILE")
+    local show=$((count < 5 ? count : 5))
+    gum style --foreground 8 --faint "recent"
+    tail -n "$show" "$HISTORY_FILE" | tac | while IFS= read -r line; do
+      gum style --foreground 8 --faint "  › $line"
+    done
+    echo ""
+  fi
+}
+
+# Show the header
+show_header() {
+  gum style \
+    --foreground 4 --bold \
+    --border rounded \
+    --border-foreground 8 \
+    --padding "0 2" \
+    --margin "0 0 1 0" \
+    "⌘  Command Center"
+}
+
+# Load last action state
+load_last_action() {
+  if [[ -f "$LAST_ACTION_FILE" ]]; then
+    source "$LAST_ACTION_FILE" 2>/dev/null || true
+  fi
+}
+
+# Process a single command input
+process_input() {
+  local input="$1"
+
+  # Route the input (with spinner for non-instant tiers)
+  local route_output
+  route_output=$(gum spin --spinner dot --title "Thinking..." --show-output -- omarchy-cc-route "$input" 2>/dev/null) || true
+
+  if [[ -z "$route_output" ]]; then
+    gum style --foreground 1 "✗ Couldn't understand that."
+    return 1
+  fi
+
+  # Parse tier information
+  local tier="pattern"
+  local command="$route_output"
+
+  if [[ "$route_output" == TIER:* ]]; then
+    tier=$(echo "$route_output" | head -1 | sed 's/^TIER://')
+    command=$(echo "$route_output" | tail -n +2)
+  fi
+
+  # Show what we're about to do
+  local tier_color=8
+  case "$tier" in
+    pattern) tier_color=2 ;;   # green — instant
+    ollama)  tier_color=3 ;;   # yellow — local LLM
+    claude)  tier_color=5 ;;   # purple — cloud
+  esac
+
+  if [[ "$tier" != "pattern" && "$tier" != "none" ]]; then
+    gum style --foreground "$tier_color" --bold --inline "$tier"
+    printf " "
+    gum style --foreground 8 --faint "$command"
+  else
+    gum style --foreground 8 --faint "$command"
+  fi
+  echo ""
+
+  # For Claude tier with multi-line output, show and confirm
+  if [[ "$tier" == "claude" ]]; then
+    local line_count
+    line_count=$(echo "$command" | wc -l)
+    if [[ $line_count -gt 3 ]]; then
+      echo "$command" | gum style --foreground 7 --border rounded --padding "1 2"
+      echo ""
+      if ! gum confirm "Execute this?"; then
+        gum style --foreground 3 "Cancelled."
+        return 1
+      fi
+    fi
+  fi
+
+  # Execute via the safety gate (pass tier and input for logging)
+  omarchy-cc-exec -t "$tier" -i "$input" $command
+
+  add_history "$input"
+}
+
+# Handle meta-commands: undo, again, last
+handle_meta() {
+  local input="$1"
+
+  case "$input" in
+    undo|"undo that"|"go back"|"revert")
+      load_last_action
+      if [[ -n "${UNDO:-}" ]]; then
+        gum style --foreground 3 "Undoing: $UNDO"
+        echo ""
+        omarchy-cc-exec -t undo -i "undo" $UNDO
+        return 0
+      else
+        gum style --foreground 8 "Nothing to undo."
+        return 0
+      fi
+      ;;
+    again|"do that again"|"repeat"|"run again"|"same")
+      load_last_action
+      if [[ -n "${COMMAND:-}" ]]; then
+        gum style --foreground 8 --faint "Repeating: $COMMAND"
+        echo ""
+        omarchy-cc-exec -t repeat -i "${INPUT:-again}" $COMMAND
+        add_history "${INPUT:-again}"
+        return 0
+      else
+        gum style --foreground 8 "Nothing to repeat."
+        return 0
+      fi
+      ;;
+    last|"last command"|"what did i do"|"what was that")
+      load_last_action
+      if [[ -n "${COMMAND:-}" ]]; then
+        gum style --foreground 7 "Last: ${INPUT:-unknown}"
+        gum style --foreground 8 --faint "  → $COMMAND"
+        [[ -n "${UNDO:-}" ]] && gum style --foreground 8 --faint "  ↩ undo: $UNDO"
+        return 0
+      else
+        gum style --foreground 8 "No previous command."
+        return 0
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Fuzzy search history with gum filter
+search_history() {
+  if [[ ! -s "$HISTORY_FILE" ]]; then
+    gum style --foreground 8 "No history yet."
+    return
+  fi
+
+  local selected
+  selected=$(tac "$HISTORY_FILE" | gum filter --placeholder "Search history..." --height 15 --width 60) || return
+
+  if [[ -n "$selected" ]]; then
+    echo ""
+    process_input "$selected"
+  fi
+}
+
+# Show log entries
+show_log() {
+  local count="${1:-20}"
+  if [[ ! -s "$LOG_FILE" ]]; then
+    gum style --foreground 8 "No log entries yet."
+    return
+  fi
+
+  gum style --foreground 4 --bold "Activity Log"
+  echo ""
+
+  tail -n "$count" "$LOG_FILE" | while IFS= read -r line; do
+    local ts tier input cmd exit_code ms
+    ts=$(echo "$line" | jq -r '.ts' 2>/dev/null) || continue
+    tier=$(echo "$line" | jq -r '.tier' 2>/dev/null)
+    input=$(echo "$line" | jq -r '.input' 2>/dev/null)
+    cmd=$(echo "$line" | jq -r '.cmd' 2>/dev/null)
+    exit_code=$(echo "$line" | jq -r '.exit' 2>/dev/null)
+    ms=$(echo "$line" | jq -r '.ms' 2>/dev/null)
+
+    local status_icon="✓" color=2
+    [[ "$exit_code" != "0" ]] && status_icon="✗" && color=1
+
+    local tier_color=8
+    case "$tier" in
+      pattern) tier_color=2 ;;
+      ollama)  tier_color=3 ;;
+      claude)  tier_color=5 ;;
+    esac
+
+    local ts_short="${ts#*T}"
+    printf "  "
+    gum style --foreground 8 --faint --inline "$ts_short"
+    printf "  "
+    gum style --foreground "$color" --inline "$status_icon"
+    printf "  "
+    gum style --foreground "$tier_color" --inline "%-7s" "$tier"
+    printf "  %s" "$input"
+
+    if [[ "$input" != "$cmd" ]]; then
+      printf "\n"
+      gum style --foreground 8 --faint "                       → $cmd  (${ms}ms)"
+    else
+      printf "  "
+      gum style --foreground 8 --faint --inline "(${ms}ms)"
+      printf "\n"
+    fi
+  done
+}
+
+# Main TUI loop
+main() {
+  # Handle single-command mode (for piping or scripting)
+  if [[ $# -gt 0 ]]; then
+    process_input "$*"
+    exit $?
+  fi
+
+  clear
+  show_header
+  show_history
+
+  # Main loop
+  while true; do
+    local input
+    input=$(gum input \
+      --placeholder "What do you want to do?" \
+      --width 60 \
+      --char-limit 500 \
+      --prompt "> " \
+      --prompt.foreground 4 \
+    ) || true
+
+    # Handle exit
+    if [[ -z "$input" || "$input" == "q" || "$input" == "exit" || "$input" == "quit" ]]; then
+      exit 0
+    fi
+
+    # Handle clear
+    if [[ "$input" == "clear" ]]; then
+      clear
+      show_header
+      continue
+    fi
+
+    # Handle fuzzy history search
+    if [[ "$input" == "history" || "$input" == "/" ]]; then
+      search_history
+      echo ""
+      continue
+    fi
+
+    # Handle log viewing
+    if [[ "$input" == "log" || "$input" == "logs" ]]; then
+      show_log 20
+      echo ""
+      continue
+    fi
+
+    if [[ "$input" == "log all" ]]; then
+      show_log 9999
+      echo ""
+      continue
+    fi
+
+    # Handle help
+    if [[ "$input" == "help" || "$input" == "?" ]]; then
+      gum style --foreground 4 --bold "Commands"
+      echo ""
+      gum style --foreground 7 "  Type natural language commands like:"
+      gum style --foreground 8 "    set theme tokyo night       set audio to sony"
+      gum style --foreground 8 "    next wallpaper              volume up"
+      gum style --foreground 8 "    launch browser              screenshot"
+      echo ""
+      gum style --foreground 7 "  Meta:"
+      gum style --foreground 8 "    undo       — reverse the last action"
+      gum style --foreground 8 "    again      — repeat the last command"
+      gum style --foreground 8 "    last       — show what you just ran"
+      echo ""
+      gum style --foreground 7 "  Special:"
+      gum style --foreground 8 "    history /  — fuzzy search past commands"
+      gum style --foreground 8 "    log        — show recent activity log"
+      gum style --foreground 8 "    clear      — clear the screen"
+      gum style --foreground 8 "    ? help     — show this help"
+      gum style --foreground 8 "    q exit     — close Command Center"
+      echo ""
+      gum style --foreground 7 "  Voice: Hold Alt+X to dictate (if voxtype installed)"
+      echo ""
+      continue
+    fi
+
+    echo ""
+
+    # Try meta-commands first (undo, again, last)
+    if handle_meta "$input" 2>/dev/null; then
+      echo ""
+      continue
+    fi
+
+    process_input "$input"
+    echo ""
+  done
+}
+
+main "$@"

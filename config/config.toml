@@ -1,0 +1,13 @@
+[general]
+tts_enabled = false
+ollama_model = "qwen2.5-coder:7b"
+claude_enabled = true
+history_size = 100
+
+[safety]
+auto_execute_safe = true
+confirm_risky = true
+
+[voice]
+input_enabled = true
+output_enabled = false

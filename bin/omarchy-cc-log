@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# View the Command Center activity log.
+# Usage: omarchy-cc-log [count] [--follow] [--search <term>]
+
+set -euo pipefail
+
+LOG_FILE="$HOME/.cache/omarchy-cc/cc.log"
+
+if [[ ! -s "$LOG_FILE" ]]; then
+  echo "No log entries yet."
+  exit 0
+fi
+
+count=30
+follow=false
+search=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --follow|-f) follow=true; shift ;;
+    --search|-s) search="$2"; shift 2 ;;
+    --all|-a)    count=999999; shift ;;
+    --clear)     > "$LOG_FILE"; echo "Log cleared."; exit 0 ;;
+    [0-9]*)      count="$1"; shift ;;
+    *)           shift ;;
+  esac
+done
+
+format_entry() {
+  local line="$1"
+  local ts tier input cmd exit_code ms
+  ts=$(echo "$line" | jq -r '.ts' 2>/dev/null) || return
+  tier=$(echo "$line" | jq -r '.tier' 2>/dev/null)
+  input=$(echo "$line" | jq -r '.input' 2>/dev/null)
+  cmd=$(echo "$line" | jq -r '.cmd' 2>/dev/null)
+  exit_code=$(echo "$line" | jq -r '.exit' 2>/dev/null)
+  ms=$(echo "$line" | jq -r '.ms' 2>/dev/null)
+
+  local status="OK"
+  [[ "$exit_code" != "0" ]] && status="FAIL"
+
+  local ts_short="${ts#*T}"
+  printf "\033[2m%s\033[0m  \033[34m%-7s\033[0m  " "$ts_short" "$tier"
+
+  if [[ "$status" == "OK" ]]; then
+    printf "\033[32m✓\033[0m"
+  else
+    printf "\033[31m✗\033[0m"
+  fi
+
+  printf "  %s" "$input"
+
+  if [[ "$input" != "$cmd" ]]; then
+    printf "\n\033[2m                            → %s\033[0m" "$cmd"
+  fi
+  printf "  \033[2m(%sms)\033[0m\n" "$ms"
+}
+
+if [[ "$follow" == "true" ]]; then
+  tail -f "$LOG_FILE" | while IFS= read -r line; do
+    format_entry "$line"
+  done
+else
+  local_lines=$(tail -n "$count" "$LOG_FILE")
+  if [[ -n "$search" ]]; then
+    local_lines=$(echo "$local_lines" | grep -i "$search" || true)
+  fi
+  echo "$local_lines" | while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    format_entry "$line"
+  done
+fi

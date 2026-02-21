@@ -1,0 +1,268 @@
+#!/bin/bash
+
+# Execute a command with safety classification.
+# Safe commands auto-execute. Risky commands require confirmation via gum.
+# Logs every execution. Saves undo state for reversible commands.
+
+set -euo pipefail
+
+CONFIG_DIR="$HOME/.config/omarchy-cc"
+CACHE_DIR="$HOME/.cache/omarchy-cc"
+SAFE_COMMANDS_FILE="$CONFIG_DIR/safe-commands"
+LOG_FILE="$CACHE_DIR/cc.log"
+LAST_ACTION_FILE="$CACHE_DIR/last-action"
+
+mkdir -p "$CACHE_DIR"
+
+# Read config value
+read_config() {
+  local key="$1" default="$2"
+  if [[ -f "$CONFIG_DIR/config.toml" ]]; then
+    local val
+    val=$(grep "^${key}\s*=" "$CONFIG_DIR/config.toml" 2>/dev/null | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | xargs)
+    [[ -n "$val" ]] && echo "$val" || echo "$default"
+  else
+    echo "$default"
+  fi
+}
+
+AUTO_EXECUTE=$(read_config "auto_execute_safe" "true")
+CONFIRM_RISKY=$(read_config "confirm_risky" "true")
+TTS_ENABLED=$(read_config "tts_enabled" "false")
+
+# Capture state before execution for undo support
+capture_undo_state() {
+  local cmd="$1"
+  local undo=""
+
+  case "$cmd" in
+    omarchy-theme-set\ *)
+      local prev_theme
+      prev_theme=$(omarchy-theme-current 2>/dev/null || echo "")
+      [[ -n "$prev_theme" ]] && undo="omarchy-theme-set \"$prev_theme\""
+      ;;
+    omarchy-font-set\ *)
+      local prev_font
+      prev_font=$(omarchy-font-current 2>/dev/null || echo "")
+      [[ -n "$prev_font" ]] && undo="omarchy-font-set \"$prev_font\""
+      ;;
+    omarchy-toggle-*|"wpctl set-mute"*)
+      # Toggles undo themselves
+      undo="$cmd"
+      ;;
+    "wpctl set-volume"*5%+*)
+      undo="${cmd/5%+/5%-}"
+      ;;
+    "wpctl set-volume"*5%-*)
+      undo="${cmd/5%-/5%+}"
+      ;;
+    "brightnessctl set"*+*)
+      undo="${cmd/+/-}"
+      ;;
+    "brightnessctl set"*-*)
+      undo="${cmd/-/+}"
+      ;;
+    "pactl set-default-sink"*)
+      local prev_sink
+      prev_sink=$(pactl get-default-sink 2>/dev/null || echo "")
+      [[ -n "$prev_sink" ]] && undo="pactl set-default-sink '$prev_sink'"
+      ;;
+  esac
+
+  echo "$undo"
+}
+
+# Save last action state
+save_last_action() {
+  local input="$1" cmd="$2" undo="$3" exit_code="$4"
+  cat > "$LAST_ACTION_FILE" <<EOF
+INPUT=$input
+COMMAND=$cmd
+UNDO=$undo
+EXIT=$exit_code
+EOF
+}
+
+# Log an execution (JSON lines format)
+log_entry() {
+  local tier="$1" input="$2" cmd="$3" exit_code="$4" duration_ms="$5" output_preview="$6"
+  # Escape strings for JSON
+  input=$(echo "$input" | sed 's/\\/\\\\/g; s/"/\\"/g' | head -1)
+  cmd=$(echo "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g' | head -1)
+  output_preview=$(echo "$output_preview" | sed 's/\\/\\\\/g; s/"/\\"/g' | head -c 200)
+  local ts
+  ts=$(date '+%Y-%m-%dT%H:%M:%S')
+  echo "{\"ts\":\"$ts\",\"tier\":\"$tier\",\"input\":\"$input\",\"cmd\":\"$cmd\",\"exit\":$exit_code,\"ms\":$duration_ms,\"output\":\"$output_preview\"}" >> "$LOG_FILE"
+}
+
+# Check if command is explicitly safe
+is_safe() {
+  local cmd="$1"
+  local first_word="${cmd%% *}"
+
+  if [[ ! -f "$SAFE_COMMANDS_FILE" ]]; then
+    is_safe_builtin "$cmd"
+    return $?
+  fi
+
+  while IFS= read -r pattern; do
+    [[ "$pattern" =~ ^#.*$ || -z "$pattern" ]] && continue
+    pattern=$(echo "$pattern" | xargs)
+    if [[ "$cmd" == "$pattern"* || "$first_word" == "$pattern" ]]; then
+      return 0
+    fi
+  done < "$SAFE_COMMANDS_FILE"
+
+  return 1
+}
+
+# Built-in safety defaults
+is_safe_builtin() {
+  local cmd="$1"
+  case "$cmd" in
+    omarchy-theme-*|omarchy-font-*|omarchy-toggle-*|omarchy-launch-*) return 0 ;;
+    omarchy-version*|omarchy-battery-*|omarchy-powerprofiles-*) return 0 ;;
+    omarchy-cmd-screenshot*|omarchy-cmd-screenrecord*|omarchy-cmd-share*) return 0 ;;
+    omarchy-cmd-audio-switch*|omarchy-cmd-terminal-cwd*) return 0 ;;
+    omarchy-lock-screen*|omarchy-cmd-screensaver*) return 0 ;;
+    omarchy-menu*|omarchy-debug*|omarchy-voxtype-status*) return 0 ;;
+    omarchy-hyprland-*|omarchy-notification-*) return 0 ;;
+    wpctl\ *|pactl\ *) return 0 ;;
+    hyprctl\ dispatch*|hyprctl\ monitors*|hyprctl\ clients*|hyprctl\ activewindow*|hyprctl\ workspaces*) return 0 ;;
+    brightnessctl\ *) return 0 ;;
+    date*|cal*|uptime*|whoami*|hostname*|uname*|df*|free*|sensors*|fastfetch*|neofetch*) return 0 ;;
+    echo\ *|printf\ *|ls\ *|cat\ *|head\ *|tail\ *|wc\ *|which\ *|type\ *|file\ *|stat\ *) return 0 ;;
+    uwsm-app\ *) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Check if command is explicitly risky
+is_risky() {
+  local cmd="$1"
+  case "$cmd" in
+    omarchy-pkg-add*|omarchy-pkg-drop*) return 0 ;;
+    omarchy-install-*|omarchy-remove-*) return 0 ;;
+    omarchy-refresh-*|omarchy-reinstall-*) return 0 ;;
+    omarchy-restart-*) return 0 ;;
+    omarchy-setup-*) return 0 ;;
+    omarchy-update*) return 0 ;;
+    *sudo*|*rm\ *|*rm\ -rf*|*mv\ /*|*cp\ /*) return 0 ;;
+    *systemctl*) return 0 ;;
+    *pacman*|*yay*) return 0 ;;
+    *"$HOME/.config/"*|*"~/.config/"*) return 0 ;;
+    omarchy-cmd-reboot*|omarchy-cmd-shutdown*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Speak result via TTS if enabled
+speak() {
+  if [[ "$TTS_ENABLED" == "true" ]] && command -v espeak-ng &>/dev/null; then
+    echo "$1" | espeak-ng -s 160 2>/dev/null &
+  fi
+}
+
+# Execute a command, log it, save undo state
+execute() {
+  local cmd="$1" tier="${2:-unknown}" input="${3:-}"
+  local output exit_code
+
+  # Capture undo state before running
+  local undo
+  undo=$(capture_undo_state "$cmd")
+
+  # Time the execution
+  local start_ms
+  start_ms=$(date +%s%3N)
+
+  output=$(eval "$cmd" 2>&1) && exit_code=0 || exit_code=$?
+
+  local end_ms
+  end_ms=$(date +%s%3N)
+  local duration_ms=$((end_ms - start_ms))
+
+  if [[ -n "$output" ]]; then
+    echo "$output"
+  fi
+
+  if [[ $exit_code -eq 0 ]]; then
+    [[ -n "$output" ]] && speak "Done."
+  else
+    gum style --foreground 1 "Command failed (exit code $exit_code)"
+    speak "Command failed."
+  fi
+
+  # Log and save state
+  log_entry "$tier" "$input" "$cmd" "$exit_code" "$duration_ms" "$output"
+  save_last_action "$input" "$cmd" "$undo" "$exit_code"
+
+  return $exit_code
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: omarchy-cc-exec [-t tier] [-i input] <command>" >&2
+    exit 1
+  fi
+
+  # Parse optional flags
+  local tier="unknown" input=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t) tier="$2"; shift 2 ;;
+      -i) input="$2"; shift 2 ;;
+      *)  break ;;
+    esac
+  done
+
+  local cmd="$*"
+  [[ -z "$input" ]] && input="$cmd"
+
+  # Auto-execute safe commands
+  if [[ "$AUTO_EXECUTE" == "true" ]] && is_safe "$cmd"; then
+    execute "$cmd" "$tier" "$input"
+    return $?
+  fi
+
+  # Confirm risky commands
+  if is_risky "$cmd" && [[ "$CONFIRM_RISKY" == "true" ]]; then
+    echo ""
+    gum style --foreground 3 --bold "Risky command detected"
+    echo ""
+    gum style --foreground 7 --faint "$cmd"
+    echo ""
+
+    if gum confirm "Run this command?"; then
+      execute "$cmd" "$tier" "$input"
+      return $?
+    else
+      gum style --foreground 3 "Cancelled."
+      speak "Cancelled."
+      log_entry "$tier" "$input" "$cmd" "cancelled" "0" ""
+      return 1
+    fi
+  fi
+
+  # Unknown classification — if auto-execute is on and it's not explicitly risky, run it
+  if [[ "$AUTO_EXECUTE" == "true" ]] && ! is_risky "$cmd"; then
+    execute "$cmd" "$tier" "$input"
+    return $?
+  fi
+
+  # Default: confirm before running
+  echo ""
+  gum style --foreground 7 --faint "$cmd"
+  echo ""
+
+  if gum confirm "Run this command?"; then
+    execute "$cmd" "$tier" "$input"
+    return $?
+  else
+    gum style --foreground 3 "Cancelled."
+    log_entry "$tier" "$input" "$cmd" "cancelled" "0" ""
+    return 1
+  fi
+}
+
+main "$@"

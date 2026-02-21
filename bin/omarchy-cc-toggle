@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Toggle the Command Center window: focus if it exists, close if focused, or open a new one.
+
+TITLE="Command Center"
+
+# Check if the CC window already exists
+cc_address=$(hyprctl clients -j | jq -r ".[] | select(.title == \"$TITLE\") | .address" | head -1)
+
+if [[ -n "$cc_address" ]]; then
+  # CC window exists — check if it's focused
+  focused_address=$(hyprctl activewindow -j | jq -r '.address')
+
+  if [[ "$cc_address" == "$focused_address" ]]; then
+    # Already focused — close it
+    hyprctl dispatch closewindow "address:$cc_address"
+  else
+    # Exists but not focused — focus it
+    hyprctl dispatch focuswindow "address:$cc_address"
+  fi
+else
+  # CC doesn't exist — launch it
+  exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.cc --title="$TITLE" -e omarchy-cc
+fi
