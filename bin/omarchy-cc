@@ -61,6 +61,24 @@ show_history() {
   fi
 }
 
+# Copy entire pane content to clipboard
+copy_pane() {
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux capture-pane -p -S - | wl-copy 2>/dev/null
+  else
+    # Fallback: try script/terminal capture, or use saved output
+    if [[ -s "$SESSION_LOG" ]]; then
+      wl-copy < "$SESSION_LOG" 2>/dev/null
+    elif [[ -s "$LAST_OUTPUT_FILE" ]]; then
+      wl-copy < "$LAST_OUTPUT_FILE" 2>/dev/null
+    else
+      gum style --foreground 8 "Nothing to copy."
+      return
+    fi
+  fi
+  gum style --foreground 2 "  ✓ Copied to clipboard"
+}
+
 # Show the header
 show_header() {
   gum style \
@@ -206,17 +224,14 @@ process_input() {
 
   add_history "$input"
 
-  # Show copy action bar if there was output
-  if [[ -s "$LAST_OUTPUT_FILE" ]]; then
-    echo ""
-    gum style --foreground 8 --faint --inline "  [c] copy"
-    printf "\n"
-    local key
-    read -rsn1 -t 5 key 2>/dev/null || key=""
-    if [[ "$key" == "c" || "$key" == "C" ]]; then
-      wl-copy < "$LAST_OUTPUT_FILE" 2>/dev/null
-      gum style --foreground 2 "  ✓ Copied"
-    fi
+  # Show copy action bar
+  echo ""
+  gum style --foreground 8 --faint --inline "  [c] copy all"
+  printf "\n"
+  local key
+  read -rsn1 -t 5 key 2>/dev/null || key=""
+  if [[ "$key" == "c" || "$key" == "C" ]]; then
+    copy_pane
   fi
 }
 
@@ -390,26 +405,8 @@ main() {
     fi
 
     # Handle copy
-    if [[ "$input" == "copy" || "$input" == "cp" ]]; then
-      if [[ -s "$LAST_OUTPUT_FILE" ]]; then
-        wl-copy < "$LAST_OUTPUT_FILE" 2>/dev/null
-        gum style --foreground 2 "✓ Copied to clipboard"
-      else
-        gum style --foreground 8 "Nothing to copy."
-      fi
-      echo ""
-      continue
-    fi
-
-    if [[ "$input" == "copy all" || "$input" == "cp all" ]]; then
-      if [[ -s "$SESSION_LOG" ]]; then
-        wl-copy < "$SESSION_LOG" 2>/dev/null
-        local lines
-        lines=$(wc -l < "$SESSION_LOG")
-        gum style --foreground 2 "✓ Copied session ($lines lines) to clipboard"
-      else
-        gum style --foreground 8 "Nothing to copy."
-      fi
+    if [[ "$input" == "copy" || "$input" == "cp" || "$input" == "copy all" || "$input" == "cp all" ]]; then
+      copy_pane
       echo ""
       continue
     fi
@@ -429,8 +426,7 @@ main() {
       gum style --foreground 8 "    last       — show what you just ran"
       echo ""
       gum style --foreground 7 "  Special:"
-      gum style --foreground 8 "    copy       — copy last output to clipboard"
-      gum style --foreground 8 "    copy all   — copy entire session to clipboard"
+      gum style --foreground 8 "    copy       — copy terminal content to clipboard"
       gum style --foreground 8 "    history /  — fuzzy search past commands"
       gum style --foreground 8 "    log        — show recent activity log"
       gum style --foreground 8 "    clear      — clear the screen"
