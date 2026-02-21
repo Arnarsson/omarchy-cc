@@ -184,6 +184,9 @@ execute() {
 
   if [[ -n "$output" ]]; then
     echo "$output"
+    # Save output for "copy" command
+    echo "$output" > "$CACHE_DIR/last-output"
+    echo "$output" >> "$CACHE_DIR/session-output"
   fi
 
   if [[ $exit_code -eq 0 ]]; then

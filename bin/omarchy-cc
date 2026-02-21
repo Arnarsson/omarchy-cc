@@ -10,9 +10,12 @@ CACHE_DIR="$HOME/.cache/omarchy-cc"
 HISTORY_FILE="$CACHE_DIR/history"
 LOG_FILE="$CACHE_DIR/cc.log"
 LAST_ACTION_FILE="$CACHE_DIR/last-action"
+LAST_OUTPUT_FILE="$CACHE_DIR/last-output"
+SESSION_LOG="$CACHE_DIR/session-output"
 
 mkdir -p "$CACHE_DIR"
 touch "$HISTORY_FILE"
+: > "$SESSION_LOG"
 
 # Read config value
 read_config() {
@@ -373,6 +376,31 @@ main() {
       continue
     fi
 
+    # Handle copy
+    if [[ "$input" == "copy" || "$input" == "cp" ]]; then
+      if [[ -s "$LAST_OUTPUT_FILE" ]]; then
+        wl-copy < "$LAST_OUTPUT_FILE" 2>/dev/null
+        gum style --foreground 2 "✓ Copied to clipboard"
+      else
+        gum style --foreground 8 "Nothing to copy."
+      fi
+      echo ""
+      continue
+    fi
+
+    if [[ "$input" == "copy all" || "$input" == "cp all" ]]; then
+      if [[ -s "$SESSION_LOG" ]]; then
+        wl-copy < "$SESSION_LOG" 2>/dev/null
+        local lines
+        lines=$(wc -l < "$SESSION_LOG")
+        gum style --foreground 2 "✓ Copied session ($lines lines) to clipboard"
+      else
+        gum style --foreground 8 "Nothing to copy."
+      fi
+      echo ""
+      continue
+    fi
+
     # Handle help
     if [[ "$input" == "help" || "$input" == "?" ]]; then
       gum style --foreground 4 --bold "Commands"
@@ -388,6 +416,8 @@ main() {
       gum style --foreground 8 "    last       — show what you just ran"
       echo ""
       gum style --foreground 7 "  Special:"
+      gum style --foreground 8 "    copy       — copy last output to clipboard"
+      gum style --foreground 8 "    copy all   — copy entire session to clipboard"
       gum style --foreground 8 "    history /  — fuzzy search past commands"
       gum style --foreground 8 "    log        — show recent activity log"
       gum style --foreground 8 "    clear      — clear the screen"
