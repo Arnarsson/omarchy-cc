@@ -112,10 +112,12 @@ case "$action" in
     ;;
 
   monitor)
-    # Launch the live curses monitor
+    # Launch the live curses monitor in a new terminal window
     monitor_script="$(dirname "$0")/omarchy-cc-tmux-monitor"
     if [[ -x "$monitor_script" ]]; then
-      exec "$monitor_script"
+      setsid uwsm-app -- xdg-terminal-exec --title="tmux monitor" -e "$monitor_script" &>/dev/null &
+      disown
+      echo "Opened tmux monitor."
     else
       echo "Live monitor not available. Showing list instead."
       exec "$0" list

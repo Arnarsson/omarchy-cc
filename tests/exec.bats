@@ -232,6 +232,16 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "interactive: omarchy-cc-tmux monitor" {
+  run is_interactive "omarchy-cc-tmux monitor"
+  [ "$status" -eq 0 ]
+}
+
+@test "interactive: omarchy-cc-tmux-monitor" {
+  run is_interactive "omarchy-cc-tmux-monitor"
+  [ "$status" -eq 0 ]
+}
+
 @test "not interactive: date" {
   run is_interactive "date"
   [ "$status" -eq 1 ]

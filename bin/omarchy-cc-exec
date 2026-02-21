@@ -159,6 +159,7 @@ is_interactive() {
   case "$cmd" in
     omarchy-menu*|omarchy-pkg-install*|omarchy-pkg-remove*)  return 0 ;;
     omarchy-theme-set|omarchy-font-set|omarchy-theme-install*|omarchy-theme-remove*) return 0 ;;
+    omarchy-cc-tmux-monitor*|"omarchy-cc-tmux monitor"*) return 0 ;;
     *gum\ choose*|*gum\ filter*|*gum\ confirm*) return 0 ;;
     *) return 1 ;;
   esac
