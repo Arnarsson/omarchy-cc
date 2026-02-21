@@ -405,8 +405,14 @@ pattern_match() {
     "share file")           echo "omarchy-cmd-share file" ;;
 
     # Tmux sessions
-    "tmux"|"tmux session"*|"session"*|"active tmux"*|"active session"*|"list session"*|"kill session"*)
+    "tmux"|"tmux session"*|"session"*|"active tmux"*|"active session"*|"list session"*)
       echo "omarchy-cc-tmux" ;;
+    "kill session "*)
+      echo "omarchy-cc-tmux kill ${input#kill session }" ;;
+    "kill tmux "*)
+      echo "omarchy-cc-tmux kill ${input#kill tmux }" ;;
+    "kill detached"*|"kill detached session"*)
+      echo "omarchy-cc-tmux kill detached" ;;
 
     # Dictation
     "dictation status"|"voxtype status") echo "omarchy-voxtype-status" ;;

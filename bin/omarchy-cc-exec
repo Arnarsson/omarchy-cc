@@ -167,7 +167,7 @@ speak() {
 is_interactive() {
   local cmd="$1"
   case "$cmd" in
-    omarchy-cc-tmux*|omarchy-menu*|omarchy-pkg-install*|omarchy-pkg-remove*)  return 0 ;;
+    omarchy-menu*|omarchy-pkg-install*|omarchy-pkg-remove*)  return 0 ;;
     omarchy-theme-set|omarchy-font-set|omarchy-theme-install*|omarchy-theme-remove*) return 0 ;;
     *gum\ choose*|*gum\ filter*|*gum\ confirm*) return 0 ;;
     *) return 1 ;;
