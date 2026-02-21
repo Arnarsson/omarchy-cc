@@ -7,7 +7,7 @@
 # Tier 2: Ollama (fast, local LLM)
 # Tier 3: Claude CLI (complex tasks)
 
-set -euo pipefail
+set -uo pipefail
 
 CONFIG_DIR="$HOME/.config/omarchy-cc"
 CACHE_DIR="$HOME/.cache/omarchy-cc"
@@ -835,11 +835,16 @@ ollama_route() {
   local input="$1" context="$2"
   command -v ollama &>/dev/null || return 1
 
+  # Check ollama is actually running
+  if ! curl -s --max-time 2 http://localhost:11434/api/version &>/dev/null; then
+    return 1
+  fi
+
   local system_prompt
   system_prompt=$(build_ollama_prompt "$context")
 
   local result
-  result=$(ollama run "$OLLAMA_MODEL" --nowordwrap "$system_prompt
+  result=$(timeout 15 ollama run "$OLLAMA_MODEL" --nowordwrap "$system_prompt
 
 User request: $input" 2>/dev/null | tr -d '`' | sed '/^$/d' | head -5)
 

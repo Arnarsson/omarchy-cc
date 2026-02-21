@@ -4,7 +4,7 @@
 # Safe commands auto-execute. Risky commands require confirmation via gum.
 # Logs every execution. Saves undo state for reversible commands.
 
-set -euo pipefail
+set -uo pipefail
 
 CONFIG_DIR="$HOME/.config/omarchy-cc"
 CACHE_DIR="$HOME/.cache/omarchy-cc"
