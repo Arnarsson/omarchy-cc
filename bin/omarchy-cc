@@ -198,7 +198,8 @@ process_input() {
   fi
 
   # Execute via the safety gate (pass tier and input for logging)
-  omarchy-cc-exec -t "$tier" -i "$input" $command
+  # Must quote $command so pipes/|| aren't interpreted by this shell
+  omarchy-cc-exec -t "$tier" -i "$input" "$command"
 
   add_history "$input"
 }

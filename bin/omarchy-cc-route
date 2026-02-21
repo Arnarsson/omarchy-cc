@@ -379,7 +379,7 @@ pattern_match() {
     "about")                echo "omarchy-launch-about" ;;
     "system info"|"sysinfo"|"specs") echo "fastfetch" ;;
     "storage"|"disk"|"disk usage"|"disk space"|"free space"|"how much space"*)
-      echo "df -h --output=source,size,used,avail,pcent -x tmpfs -x devtmpfs -x efivarfs | head -20" ;;
+      echo "df -h --output=source,size,used,avail,pcent -x tmpfs -x devtmpfs -x efivarfs" ;;
 
     # Power
     "reboot"|"restart computer"|"restart system") echo "omarchy-cmd-reboot" ;;
@@ -603,7 +603,7 @@ keyword_match() {
 
   # ── Storage/Disk ──
   if has "storage" || has "disk" || has "space" && (has "free" || has "left" || has "available" || has "how" || has "much"); then
-    echo "df -h --output=source,size,used,avail,pcent -x tmpfs -x devtmpfs -x efivarfs | head -20"; return 0
+    echo "df -h --output=source,size,used,avail,pcent -x tmpfs -x devtmpfs -x efivarfs"; return 0
   fi
 
   # ── System info ──
