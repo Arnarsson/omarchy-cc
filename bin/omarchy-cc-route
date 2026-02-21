@@ -718,30 +718,43 @@ keyword_match() {
 # ── Context gathering for LLM tiers ──────────────────────────────────────────
 
 gather_context() {
-  local ctx=""
-  ctx+="Current theme: $(omarchy-theme-current 2>/dev/null || echo unknown)"$'\n'
+  local input="${1:-}"
+  local ctx="System: Arch Linux, Hyprland (Wayland)"$'\n'
 
-  local sink_name sink_desc
-  sink_name=$(pactl get-default-sink 2>/dev/null || echo "")
-  if [[ -n "$sink_name" ]]; then
-    sink_desc=$(pactl -f json list sinks 2>/dev/null | jq -r --arg n "$sink_name" '.[] | select(.name == $n) | .description' 2>/dev/null || echo "$sink_name")
-    ctx+="Current audio output: $sink_desc"$'\n'
+  # Only gather context fields relevant to the input
+  if [[ "$input" == *theme* || "$input" == *wallpaper* || "$input" == *background* || "$input" == *color* ]]; then
+    ctx+="Current theme: $(omarchy-theme-current 2>/dev/null || echo unknown)"$'\n'
   fi
 
-  local active_class active_title
-  active_class=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' 2>/dev/null || echo "")
-  active_title=$(hyprctl activewindow -j 2>/dev/null | jq -r '.title // empty' 2>/dev/null || echo "")
-  [[ -n "$active_class" ]] && ctx+="Active window: $active_class — $active_title"$'\n'
+  if [[ "$input" == *audio* || "$input" == *sound* || "$input" == *speaker* || "$input" == *headphone* || "$input" == *volume* || "$input" == *sink* ]]; then
+    local sink_name sink_desc
+    sink_name=$(pactl get-default-sink 2>/dev/null || echo "")
+    if [[ -n "$sink_name" ]]; then
+      sink_desc=$(pactl -f json list sinks 2>/dev/null | jq -r --arg n "$sink_name" '.[] | select(.name == $n) | .description' 2>/dev/null || echo "$sink_name")
+      ctx+="Current audio output: $sink_desc"$'\n'
+    fi
+  fi
 
-  local ws_id
-  ws_id=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty' 2>/dev/null || echo "")
-  [[ -n "$ws_id" ]] && ctx+="Current workspace: $ws_id"$'\n'
+  if [[ "$input" == *window* || "$input" == *workspace* || "$input" == *focus* || "$input" == *move* || "$input" == *app* ]]; then
+    local active_class
+    active_class=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' 2>/dev/null || echo "")
+    [[ -n "$active_class" ]] && ctx+="Active window: $active_class"$'\n'
 
-  local mon_count
-  mon_count=$(hyprctl monitors -j 2>/dev/null | jq 'length' 2>/dev/null || echo "1")
-  ctx+="Monitors: $mon_count"$'\n'
+    local ws_id
+    ws_id=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty' 2>/dev/null || echo "")
+    [[ -n "$ws_id" ]] && ctx+="Current workspace: $ws_id"$'\n'
+  fi
 
-  ctx+="Current font: $(omarchy-font-current 2>/dev/null || echo unknown)"$'\n'
+  if [[ "$input" == *font* ]]; then
+    ctx+="Current font: $(omarchy-font-current 2>/dev/null || echo unknown)"$'\n'
+  fi
+
+  if [[ "$input" == *monitor* || "$input" == *display* || "$input" == *screen* ]]; then
+    local mon_count
+    mon_count=$(hyprctl monitors -j 2>/dev/null | jq 'length' 2>/dev/null || echo "1")
+    ctx+="Monitors: $mon_count"$'\n'
+  fi
+
   echo "$ctx"
 }
 
@@ -945,9 +958,9 @@ main() {
     exit 0
   fi
 
-  # Gather context for LLM tiers
+  # Gather context for LLM tiers (only what the input needs)
   local context
-  context=$(gather_context 2>/dev/null || echo "")
+  context=$(gather_context "$raw_input" 2>/dev/null || echo "")
 
   # Check if this needs Claude
   if needs_claude "$input"; then
