@@ -76,6 +76,80 @@ load_last_action() {
   fi
 }
 
+# Generate a human-readable description of what the command does
+describe_action() {
+  local cmd="$1"
+  case "$cmd" in
+    omarchy-theme-set\ *)    echo "Setting theme to ${cmd#omarchy-theme-set }" ;;
+    omarchy-theme-set)       echo "Picking a theme" ;;
+    omarchy-theme-current*)  echo "Checking current theme" ;;
+    omarchy-theme-list*)     echo "Listing themes" ;;
+    omarchy-theme-bg-next*)  echo "Switching wallpaper" ;;
+    omarchy-theme-next*)     echo "Cycling theme" ;;
+    omarchy-theme-install*)  echo "Installing theme" ;;
+    omarchy-theme-remove*)   echo "Removing theme" ;;
+    omarchy-font-set\ *)     echo "Setting font to ${cmd#omarchy-font-set }" ;;
+    omarchy-font-current*)   echo "Checking current font" ;;
+    omarchy-font-list*)      echo "Listing fonts" ;;
+    "wpctl set-volume"*+*)   echo "Turning volume up" ;;
+    "wpctl set-volume"*-*)   echo "Turning volume down" ;;
+    "wpctl set-mute"*)       echo "Toggling mute" ;;
+    "pactl set-default-sink"*) echo "Switching audio output" ;;
+    omarchy-cmd-audio-switch*) echo "Cycling audio output" ;;
+    omarchy-launch-audio*)   echo "Opening audio settings" ;;
+    "brightnessctl set"*+*)  echo "Turning brightness up" ;;
+    "brightnessctl set"*-*)  echo "Turning brightness down" ;;
+    "brightnessctl set"*)    echo "Setting brightness" ;;
+    omarchy-toggle-nightlight*) echo "Toggling night light" ;;
+    omarchy-toggle-waybar*)  echo "Toggling status bar" ;;
+    omarchy-toggle-*)        echo "Toggling ${cmd#omarchy-toggle-}" ;;
+    omarchy-cmd-screenshot*) echo "Taking screenshot" ;;
+    omarchy-cmd-screenrecord*) echo "Recording screen" ;;
+    omarchy-cmd-share*)      echo "Sharing" ;;
+    omarchy-launch-browser*) echo "Opening browser" ;;
+    omarchy-launch-editor*)  echo "Opening editor" ;;
+    omarchy-launch-or-focus*) echo "Launching app" ;;
+    omarchy-launch-*)        echo "Opening ${cmd#omarchy-launch-}" ;;
+    "hyprctl dispatch fullscreen"*) echo "Toggling fullscreen" ;;
+    "hyprctl dispatch togglefloating"*) echo "Toggling floating" ;;
+    "hyprctl dispatch centerwindow"*) echo "Centering window" ;;
+    "hyprctl dispatch killactive"*) echo "Closing window" ;;
+    "hyprctl dispatch movetospecial"*) echo "Minimizing window" ;;
+    "hyprctl dispatch workspace "*)
+      echo "Switching to workspace ${cmd#hyprctl dispatch workspace }" ;;
+    "hyprctl dispatch movetoworkspace "*)
+      echo "Moving to workspace ${cmd#hyprctl dispatch movetoworkspace }" ;;
+    "hyprctl dispatch exec"*) echo "Launching app" ;;
+    omarchy-lock-screen*)    echo "Locking screen" ;;
+    omarchy-launch-screensaver*) echo "Starting screensaver" ;;
+    omarchy-restart-*)       echo "Restarting ${cmd#omarchy-restart-}" ;;
+    omarchy-update*)         echo "Updating system" ;;
+    omarchy-pkg-install*|omarchy-pkg-add*) echo "Installing package" ;;
+    omarchy-pkg-remove*|omarchy-pkg-drop*) echo "Removing package" ;;
+    omarchy-cmd-reboot*)     echo "Rebooting" ;;
+    omarchy-cmd-shutdown*)   echo "Shutting down" ;;
+    "systemctl suspend"*)    echo "Suspending" ;;
+    "date '+%H:%M'"*)       echo "Checking time" ;;
+    "date"*)                 echo "Checking date" ;;
+    "uptime"*)               echo "Checking uptime" ;;
+    omarchy-battery-*)       echo "Checking battery" ;;
+    omarchy-version*)        echo "Checking version" ;;
+    "fastfetch"*)            echo "Showing system info" ;;
+    "df -h"*)                echo "Checking storage" ;;
+    omarchy-menu-keybindings*) echo "Showing keybindings" ;;
+    omarchy-menu*)           echo "Opening menu" ;;
+    omarchy-hyprland-workspace-toggle-gaps*) echo "Toggling gaps" ;;
+    omarchy-hyprland-window-close-all*) echo "Closing all windows" ;;
+    omarchy-hyprland-window-pop*) echo "Popping window" ;;
+    "uwsm-app -- nautilus"*) echo "Opening file manager" ;;
+    "uwsm-app -- xdg-terminal-exec"*) echo "Opening terminal" ;;
+    omarchy-launch-bluetooth*) echo "Opening bluetooth settings" ;;
+    omarchy-launch-wifi*)    echo "Opening wifi settings" ;;
+    omarchy-voxtype-status*) echo "Checking dictation status" ;;
+    *) echo "" ;;
+  esac
+}
+
 # Process a single command input
 process_input() {
   local input="$1"
@@ -98,21 +172,15 @@ process_input() {
     command=$(echo "$route_output" | tail -n +2)
   fi
 
-  # Show what we're about to do
-  local tier_color=8
-  case "$tier" in
-    pattern) tier_color=2 ;;   # green — instant
-    ollama)  tier_color=3 ;;   # yellow — local LLM
-    claude)  tier_color=5 ;;   # purple — cloud
-  esac
+  # Show human-readable feedback
+  local description
+  description=$(describe_action "$command")
 
-  if [[ "$tier" != "pattern" && "$tier" != "none" ]]; then
-    gum style --foreground "$tier_color" --bold --inline "$tier"
-    printf " "
-    gum style --foreground 8 --faint "$command"
-  else
-    gum style --foreground 8 --faint "$command"
+  if [[ -n "$description" ]]; then
+    gum style --foreground 2 --bold --inline "→ $description"
+    echo ""
   fi
+  gum style --foreground 8 --faint "  $command"
   echo ""
 
   # For Claude tier with multi-line output, show and confirm

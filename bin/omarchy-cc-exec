@@ -187,9 +187,13 @@ execute() {
   fi
 
   if [[ $exit_code -eq 0 ]]; then
-    [[ -n "$output" ]] && speak "Done."
+    # Show "Done" only for commands that produce no output (silent actions)
+    if [[ -z "$output" ]]; then
+      gum style --foreground 2 "✓ Done"
+    fi
+    speak "Done."
   else
-    gum style --foreground 1 "Command failed (exit code $exit_code)"
+    gum style --foreground 1 "✗ Failed (exit $exit_code)"
     speak "Command failed."
   fi
 
